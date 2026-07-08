@@ -1,5 +1,5 @@
 import { supabase } from '@/db/supabase';
-import type { Role, RoleCriteria, UserRole, WeeklyStats, RolePermission } from '@/types/types';
+import type { Role, RoleCriteria, UserRole, WeeklyStats, RolePermission, PresenceLog } from '@/types/types';
 
 // =============================================
 // Roles
@@ -214,6 +214,25 @@ export async function changeUserPassword(userId: string, newPassword: string) {
   }
   if (data?.error) throw new Error(data.error);
   return data;
+}
+
+// =============================================
+// Presence Logs (room change history)
+// =============================================
+
+export async function getPresenceLogs(limit = 100): Promise<PresenceLog[]> {
+  const { data, error } = await supabase
+    .from('presence_logs')
+    .select(`
+      *,
+      profile:profiles!presence_logs_user_id_fkey(*),
+      from_channel:channels!presence_logs_from_channel_id_fkey(*),
+      to_channel:channels!presence_logs_to_channel_id_fkey(*)
+    `)
+    .order('changed_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return Array.isArray(data) ? (data as PresenceLog[]) : [];
 }
 
 // =============================================

@@ -52,6 +52,16 @@ export async function setOPStatus(isOp: boolean) {
   return data;
 }
 
+const LAST_CHANNEL_KEY = 'medic:last_channel_id';
+
+export function saveLastChannelId(channelId: string) {
+  try { localStorage.setItem(LAST_CHANNEL_KEY, channelId); } catch {}
+}
+
+export function getLastChannelId(): string | null {
+  try { return localStorage.getItem(LAST_CHANNEL_KEY); } catch { return null; }
+}
+
 export async function switchChannel(channelId: string) {
   const { data, error } = await supabase.functions.invoke('manage-presence', {
     body: { action: 'join', channel_id: channelId },
@@ -61,6 +71,7 @@ export async function switchChannel(channelId: string) {
     const msg = await error?.context?.text?.();
     throw new Error(msg || error.message);
   }
+  saveLastChannelId(channelId);
   return data;
 }
 

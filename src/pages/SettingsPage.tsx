@@ -5,9 +5,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { User, Lock, Shield } from 'lucide-react';
+import { User, Lock, Shield, Settings2, Trash2, Plus } from 'lucide-react';
 import { updateProfile, changePassword } from '@/services/adminService';
+import {
+  getChannels, addChannel, updateChannelTrackTime, deleteChannel,
+} from '@/services/presenceService';
+import type { Channel } from '@/types/types';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function SettingsPage() {
   const { profile, refreshProfile } = useAuth();
@@ -18,6 +27,72 @@ export default function SettingsPage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+
+  // Channel management (admin only)
+  const isAdmin = profile?.system_role === 'super_admin' || profile?.system_role === 'admin';
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [loadingChannels, setLoadingChannels] = useState(false);
+  const [newChannelName, setNewChannelName] = useState('');
+  const [creatingChannel, setCreatingChannel] = useState(false);
+  const [channelToDelete, setChannelToDelete] = useState<Channel | null>(null);
+  const [deletingChannel, setDeletingChannel] = useState(false);
+
+  const loadChannels = useCallback(async () => {
+    if (!isAdmin) return;
+    setLoadingChannels(true);
+    try {
+      const ch = await getChannels();
+      setChannels(ch);
+    } catch {
+      toast.error('โหลดห้องไม่สำเร็จ');
+    } finally {
+      setLoadingChannels(false);
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    loadChannels();
+  }, [loadChannels]);
+
+  const handleChannelTrackTime = async (channelId: string, track: boolean) => {
+    try {
+      await updateChannelTrackTime(channelId, track);
+      setChannels(prev => prev.map(c => c.id === channelId ? { ...c, track_time: track } : c));
+      toast.success('อัปเดตการตั้งค่าห้องสำเร็จ');
+    } catch {
+      toast.error('อัปเดตการตั้งค่าห้องไม่สำเร็จ');
+    }
+  };
+
+  const handleCreateChannel = async () => {
+    if (!newChannelName.trim()) { toast.error('กรุณากรอกชื่อห้อง'); return; }
+    setCreatingChannel(true);
+    try {
+      const ch = await addChannel(newChannelName.trim());
+      setChannels(prev => [...prev, ch]);
+      setNewChannelName('');
+      toast.success(`สร้างห้อง "${ch.display_name}" สำเร็จ`);
+    } catch {
+      toast.error('สร้างห้องไม่สำเร็จ');
+    } finally {
+      setCreatingChannel(false);
+    }
+  };
+
+  const handleDeleteChannel = async () => {
+    if (!channelToDelete) return;
+    setDeletingChannel(true);
+    try {
+      await deleteChannel(channelToDelete.id);
+      setChannels(prev => prev.filter(c => c.id !== channelToDelete.id));
+      toast.success(`ลบห้อง "${channelToDelete.display_name}" สำเร็จ`);
+      setChannelToDelete(null);
+    } catch {
+      toast.error('ลบห้องไม่สำเร็จ');
+    } finally {
+      setDeletingChannel(false);
+    }
+  };
 
   useEffect(() => {
     if (profile) {
@@ -145,6 +220,68 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* Channel management (admin only) */}
+      {isAdmin && (
+        <Card className="border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Settings2 className="w-4 h-4 text-primary" /> จัดการห้องคาเฟ่
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Input
+                value={newChannelName}
+                onChange={e => setNewChannelName(e.target.value)}
+                placeholder="ชื่อห้องใหม่..."
+                className="bg-muted border-border h-8 text-sm flex-1"
+                onKeyDown={e => e.key === 'Enter' && handleCreateChannel()}
+              />
+              <Button
+                size="sm"
+                onClick={handleCreateChannel}
+                disabled={creatingChannel}
+                className="h-8 bg-primary text-primary-foreground hover:opacity-90 shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" />
+                {creatingChannel ? 'กำลังสร้าง...' : 'เพิ่มห้อง'}
+              </Button>
+            </div>
+            <div className="space-y-1">
+              {loadingChannels ? (
+                <p className="text-xs text-muted-foreground py-2">กำลังโหลด...</p>
+              ) : channels.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2">ยังไม่มีห้อง</p>
+              ) : (
+                channels.map(ch => (
+                  <div key={ch.id} className="flex items-center justify-between gap-3 py-2 border-b border-border/50 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{ch.display_name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {ch.track_time ? 'นับเวลาทำงาน ✓' : 'ไม่นับเวลา'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Switch
+                        checked={ch.track_time}
+                        onCheckedChange={v => handleChannelTrackTime(ch.id, v)}
+                      />
+                      <Button
+                        variant="ghost" size="icon"
+                        className="w-7 h-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setChannelToDelete(ch)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Change password */}
       <Card className="border-border">
         <CardHeader className="pb-3">
@@ -187,6 +324,28 @@ export default function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Delete channel confirm */}
+      <AlertDialog open={!!channelToDelete} onOpenChange={open => !open && setChannelToDelete(null)}>
+        <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>ลบห้อง "{channelToDelete?.display_name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              ผู้ใช้ที่อยู่ในห้องนี้จะถูกเตะออก และข้อมูลห้องจะหายถาวร ไม่สามารถย้อนกลับได้
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ยกเลิก</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteChannel}
+              disabled={deletingChannel}
+              className="bg-destructive text-destructive-foreground hover:opacity-90"
+            >
+              {deletingChannel ? 'กำลังลบ...' : 'ลบห้อง'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

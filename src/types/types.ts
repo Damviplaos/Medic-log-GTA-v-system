@@ -45,6 +45,19 @@ export interface QueuePointer {
   updated_at: string;
 }
 
+export interface PresenceLog {
+  id: string;
+  user_id: string;
+  from_channel_id: string | null;
+  to_channel_id: string | null;
+  changed_at: string;
+  created_at: string;
+  // joined
+  profile?: Profile;
+  from_channel?: Channel;
+  to_channel?: Channel;
+}
+
 export interface Role {
   id: string;
   name: string;

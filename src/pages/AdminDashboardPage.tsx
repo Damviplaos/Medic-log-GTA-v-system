@@ -5,12 +5,18 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
-import { CheckCircle, Clock, Star, Users, RefreshCw, Search, ExternalLink } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+} from '@/components/ui/dialog';
+import {
+  CheckCircle, Clock, Star, Users, RefreshCw, Search, ExternalLink, History,
+} from 'lucide-react';
 import {
   getAllProfiles, getAllWeeklyStats, getUserRoles, getWeekStart, refreshWeeklyStats,
-  getRoleCriteria,
+  getRoleCriteria, getPresenceLogs,
 } from '@/services/adminService';
-import type { Profile, WeeklyStats, Role } from '@/types/types';
+import type { Profile, WeeklyStats, Role, PresenceLog } from '@/types/types';
+import { toast } from 'sonner';
 
 function fmtTime(secs: number): string {
   const h = Math.floor(secs / 3600);
@@ -23,6 +29,75 @@ interface UserRow {
   roles: Role[];
   stats: WeeklyStats | null;
   eligible: boolean;
+}
+
+// =============================================
+// Room change log dialog
+// =============================================
+function PresenceLogDialog() {
+  const [open, setOpen] = useState(false);
+  const [logs, setLogs] = useState<PresenceLog[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getPresenceLogs(200);
+      setLogs(data);
+    } catch {
+      toast.error('โหลดประวัติห้องไม่สำเร็จ');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) load();
+  }, [open, load]);
+
+  const displayName = (p?: Profile) => p?.nickname || p?.ic_name || p?.username || '—';
+  const channelName = (ch?: { display_name?: string }) => ch?.display_name || '—';
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8">
+          <History className="w-3.5 h-3.5 mr-1" /> ประวัติห้อง
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base">ประวัติการย้ายห้อง</DialogTitle>
+        </DialogHeader>
+        <div className="overflow-y-auto flex-1 pr-1">
+          {loading ? (
+            <div className="space-y-2 py-2">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          ) : logs.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">ไม่มีประวัติการย้ายห้อง</p>
+          ) : (
+            <div className="space-y-1.5">
+              {logs.map(log => (
+                <div key={log.id} className="flex items-center justify-between gap-3 py-2 px-2 rounded-sm border border-border/50 text-xs">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium text-foreground truncate">{displayName(log.profile)}</span>
+                    <span className="text-muted-foreground mx-1">ย้ายจาก</span>
+                    <span className="text-foreground">{channelName(log.from_channel)}</span>
+                    <span className="text-muted-foreground mx-1">ไป</span>
+                    <span className="text-foreground">{channelName(log.to_channel)}</span>
+                  </div>
+                  <span className="text-muted-foreground shrink-0">
+                    {new Date(log.changed_at).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export default function AdminDashboardPage() {
@@ -105,6 +180,7 @@ export default function AdminDashboardPage() {
           <Button variant="outline" size="sm" onClick={loadData} className="h-8">
             <RefreshCw className="w-3.5 h-3.5 mr-1" /> รีเฟรช
           </Button>
+          <PresenceLogDialog />
         </div>
       </div>
 

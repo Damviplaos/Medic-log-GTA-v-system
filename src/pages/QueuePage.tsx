@@ -7,10 +7,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { ChevronRight, Shuffle, ArrowRight, Star } from 'lucide-react';
+import { ChevronRight, Shuffle, ArrowRight, Star, Users } from 'lucide-react';
 import type { PresenceWithProfile, Channel } from '@/types/types';
 import { getUserRoles } from '@/services/adminService';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { Role } from '@/types/types';
 
 // =============================================
@@ -107,6 +107,56 @@ function UserRow({ presence, isPointed, isMe, channels, onSwitchChannel }: UserR
 }
 
 // =============================================
+// Channel matching (จับคู่)
+// =============================================
+function ChannelMatching({ presences }: { presences: PresenceWithProfile[] }) {
+  const [pairs, setPairs] = useState<Array<[PresenceWithProfile, PresenceWithProfile]>>([]);
+
+  const doMatch = useCallback(() => {
+    if (presences.length < 2) {
+      toast.error('ต้องมีสมาชิกอย่างน้อย 2 คนในห้องนี้');
+      return;
+    }
+    const shuffled = [...presences].sort(() => Math.random() - 0.5);
+    const newPairs: Array<[PresenceWithProfile, PresenceWithProfile]> = [];
+    for (let i = 0; i + 1 < shuffled.length; i += 2) {
+      newPairs.push([shuffled[i], shuffled[i + 1]]);
+    }
+    setPairs(newPairs);
+    toast.success(`จับคู่สำเร็จ ${newPairs.length} คู่`);
+  }, [presences]);
+
+  const displayName = (p?: PresenceWithProfile) =>
+    p?.profile?.nickname || p?.profile?.ic_name || p?.profile?.username || '—';
+
+  return (
+    <div className="px-3 py-2 mt-1 rounded-sm border border-dashed border-border bg-muted/30">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Users className="w-3.5 h-3.5" />
+          <span>ระบบจับคู่</span>
+        </div>
+        <Button variant="outline" size="sm" onClick={doMatch} disabled={presences.length < 2}
+          className="h-6 text-[11px] px-2 border-border">
+          สุ่มจับคู่
+        </Button>
+      </div>
+      {pairs.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {pairs.map((pair, idx) => (
+            <div key={idx} className="flex items-center gap-2 text-xs">
+              <span className="text-foreground font-medium truncate">{displayName(pair[0])}</span>
+              <span className="text-muted-foreground">+</span>
+              <span className="text-foreground font-medium truncate">{displayName(pair[1])}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================
 // Channel section
 // =============================================
 interface ChannelSectionProps {
@@ -150,6 +200,8 @@ function ChannelSection({ channel, presences, pointedUserId, myUserId, channels,
           ))
         )}
       </div>
+      {/* Matching system at the end of member list */}
+      <ChannelMatching presences={presences} />
       <div className="channel-divider mt-2" />
     </div>
   );

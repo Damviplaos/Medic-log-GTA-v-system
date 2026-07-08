@@ -55,6 +55,8 @@ Deno.serve(async (req: Request) => {
         .eq('user_id', user.id)
         .maybeSingle();
 
+      const previousChannelId = existingPresence?.channel_id ?? null;
+
       if (existingPresence) {
         // Close open time log
         await supabaseAdmin
@@ -89,6 +91,16 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify({ error: presenceError.message }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Log channel change
+      if (previousChannelId !== targetChannelId) {
+        await supabaseAdmin.from('presence_logs').insert({
+          user_id: user.id,
+          from_channel_id: previousChannelId,
+          to_channel_id: targetChannelId,
+          changed_at: new Date().toISOString(),
         });
       }
 

@@ -12,6 +12,7 @@ import {
   setOPStatus,
   advanceQueuePointer,
   randomSelectOP,
+  getLastChannelId,
 } from '@/services/presenceService';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
@@ -36,7 +37,7 @@ export function useQueue() {
     setPointer(ptr);
   }, []);
 
-  // Auto-join on mount
+  // Auto-join on mount (restore last channel after refresh/F5)
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -45,7 +46,8 @@ export function useQueue() {
       setLoading(true);
       try {
         if (!joinedRef.current) {
-          await joinPresence();
+          const lastChannelId = getLastChannelId();
+          await joinPresence(lastChannelId ?? undefined);
           joinedRef.current = true;
         }
         if (!cancelled) await fetchAll();
