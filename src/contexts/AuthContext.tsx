@@ -1,5 +1,5 @@
 // @refresh reset
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { supabase } from '@/db/supabase';
 import type { User } from '@supabase/supabase-js';
 import type { Profile } from '@/types/types';
@@ -19,10 +19,21 @@ export async function getProfile(userId: string): Promise<Profile | null> {
   return data as Profile | null;
 }
 
+async function loadPermissions(userId: string): Promise<string[]> {
+  try {
+    const { data } = await supabase.rpc('get_user_permissions', { p_user_id: userId });
+    return Array.isArray(data) ? data.map((r: { permission: string }) => r.permission) : [];
+  } catch {
+    return [];
+  }
+}
+
 interface AuthContextType {
   user: User | null;
   profile: Profile | null;
+  permissions: string[];
   loading: boolean;
+  hasPermission: (key: string) => boolean;
   signInWithUsername: (username: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -33,35 +44,50 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const refreshProfile = async () => {
-    if (!user) { setProfile(null); return; }
-    const profileData = await getProfile(user.id);
+  const loadUserData = useCallback(async (userId: string) => {
+    const [profileData, perms] = await Promise.all([
+      getProfile(userId),
+      loadPermissions(userId),
+    ]);
     setProfile(profileData);
+    setPermissions(perms);
+  }, []);
+
+  const refreshProfile = async () => {
+    if (!user) { setProfile(null); setPermissions([]); return; }
+    await loadUserData(user.id);
   };
 
   useEffect(() => {
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
         setUser(session?.user ?? null);
-        if (session?.user) getProfile(session.user.id).then(p => setProfile(p));
+        if (session?.user) loadUserData(session.user.id);
       })
       .catch(error => toast.error(`โหลดเซสชันไม่สำเร็จ: ${error.message}`))
       .finally(() => setLoading(false));
 
-    // In this function, do NOT use any await calls. Use .then() instead to avoid deadlocks.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        getProfile(session.user.id).then(p => setProfile(p));
+        loadUserData(session.user.id);
       } else {
         setProfile(null);
+        setPermissions([]);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [loadUserData]);
+
+  const hasPermission = useCallback((key: string): boolean => {
+    // super_admin and admin always have all permissions
+    if (profile?.system_role === 'super_admin' || profile?.system_role === 'admin') return true;
+    return permissions.includes(key);
+  }, [profile, permissions]);
 
   const signInWithUsername = async (username: string, password: string) => {
     try {
@@ -78,10 +104,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setPermissions([]);
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signInWithUsername, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, permissions, loading, hasPermission, signInWithUsername, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

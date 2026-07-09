@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,13 +10,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
 import {
-  CheckCircle, Clock, Star, Users, RefreshCw, Search, ExternalLink, History,
+  CheckCircle, Clock, Star, Users, RefreshCw, Search, ExternalLink, History, Banknote,
 } from 'lucide-react';
 import {
-  getAllProfiles, getAllWeeklyStats, getUserRoles, getWeekStart, refreshWeeklyStats,
-  getRoleCriteria, getPresenceLogs,
+  getAllProfiles, getAllWeeklyStats, getUserRoles, getWeekStart, getRoleCriteria, getPresenceLogs,
 } from '@/services/adminService';
-import type { Profile, WeeklyStats, Role, PresenceLog } from '@/types/types';
+import type { Profile, WeeklyStats, Role, PresenceLog, RoleCriteria } from '@/types/types';
 import { toast } from 'sonner';
 
 function fmtTime(secs: number): string {
@@ -24,11 +24,16 @@ function fmtTime(secs: number): string {
   return `${h}h ${m}m`;
 }
 
+function fmtBaht(amount: number): string {
+  return amount.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
 interface UserRow {
   profile: Profile;
   roles: Role[];
   stats: WeeklyStats | null;
   eligible: boolean;
+  criteria: RoleCriteria | null;
 }
 
 // =============================================
@@ -51,9 +56,7 @@ function PresenceLogDialog() {
     }
   }, []);
 
-  useEffect(() => {
-    if (open) load();
-  }, [open, load]);
+  useEffect(() => { if (open) load(); }, [open, load]);
 
   const displayName = (p?: Profile) => p?.nickname || p?.ic_name || p?.username || '—';
   const channelName = (ch?: { display_name?: string }) => ch?.display_name || '—';
@@ -81,7 +84,7 @@ function PresenceLogDialog() {
               {logs.map(log => (
                 <div key={log.id} className="flex items-center justify-between gap-3 py-2 px-2 rounded-sm border border-border/50 text-xs">
                   <div className="flex-1 min-w-0">
-                    <span className="font-medium text-foreground truncate">{displayName(log.profile)}</span>
+                    <span className="font-medium text-foreground">{displayName(log.profile)}</span>
                     <span className="text-muted-foreground mx-1">ย้ายจาก</span>
                     <span className="text-foreground">{channelName(log.from_channel)}</span>
                     <span className="text-muted-foreground mx-1">ไป</span>
@@ -123,11 +126,11 @@ export default function AdminDashboardPage() {
           const roles = userRoles.map(ur => ur.role!).filter(Boolean) as Role[];
           const stats = statsMap[p.id] ?? null;
 
-          // Check eligibility
           let eligible = false;
+          let criteria: RoleCriteria | null = null;
           if (roles.length > 0) {
             const topRole = roles[roles.length - 1];
-            const criteria = await getRoleCriteria(topRole.id);
+            criteria = await getRoleCriteria(topRole.id);
             if (criteria && stats && (criteria.work_hours_enabled || criteria.op_hours_enabled)) {
               const workH = (stats.total_work_seconds ?? 0) / 3600;
               const opH = (stats.total_op_seconds ?? 0) / 3600;
@@ -137,7 +140,7 @@ export default function AdminDashboardPage() {
             }
           }
 
-          return { profile: p, roles, stats, eligible };
+          return { profile: p, roles, stats, eligible, criteria };
         })
       );
 

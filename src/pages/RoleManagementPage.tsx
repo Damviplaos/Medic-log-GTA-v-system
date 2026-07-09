@@ -30,6 +30,7 @@ function RoleCriteriaEditor({ role }: { role: Role }) {
     op_hours_enabled: false,
     min_work_hours_per_week: 0,
     min_op_hours_per_week: 0,
+    hourly_salary: null,
   });
   const [saving, setSaving] = useState(false);
 
@@ -49,6 +50,7 @@ function RoleCriteriaEditor({ role }: { role: Role }) {
         op_hours_enabled: criteria.op_hours_enabled ?? false,
         min_work_hours_per_week: criteria.work_hours_enabled ? (criteria.min_work_hours_per_week ?? 0) : null,
         min_op_hours_per_week: criteria.op_hours_enabled ? (criteria.min_op_hours_per_week ?? 0) : null,
+        hourly_salary: criteria.hourly_salary ?? null,
       });
       toast.success('บันทึกเกณฑ์สำเร็จ');
     } catch {
@@ -101,6 +103,27 @@ function RoleCriteriaEditor({ role }: { role: Role }) {
                 className="w-20 h-7 text-sm bg-muted border-border text-right px-2"
               />
               <span className="text-xs text-muted-foreground">ชม.</span>
+            </div>
+          )}
+        </div>
+        {/* Hourly salary */}
+        <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/50">
+          <div className="flex items-center gap-2 flex-1">
+            <Switch
+              checked={criteria.hourly_salary !== null && criteria.hourly_salary !== undefined}
+              onCheckedChange={v => setCriteria(c => ({ ...c, hourly_salary: v ? 0 : null }))}
+            />
+            <Label className="text-sm cursor-pointer">ค่าตอบแทนต่อชั่วโมง</Label>
+          </div>
+          {criteria.hourly_salary !== null && criteria.hourly_salary !== undefined && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Input
+                type="number" min={0} step={1}
+                value={criteria.hourly_salary ?? 0}
+                onChange={e => setCriteria(c => ({ ...c, hourly_salary: parseFloat(e.target.value) || 0 }))}
+                className="w-24 h-7 text-sm bg-muted border-border text-right px-2"
+              />
+              <span className="text-xs text-muted-foreground">บาท/ชม.</span>
             </div>
           )}
         </div>

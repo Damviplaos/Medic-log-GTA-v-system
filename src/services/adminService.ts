@@ -66,6 +66,16 @@ export async function upsertRoleCriteria(criteria: Omit<RoleCriteria, 'id' | 'cr
 }
 
 // =============================================
+// User Permissions (from role_permissions)
+// =============================================
+
+export async function getUserPermissions(userId: string): Promise<string[]> {
+  const { data, error } = await supabase.rpc('get_user_permissions', { p_user_id: userId });
+  if (error) return [];
+  return Array.isArray(data) ? data.map((row: { permission: string }) => row.permission) : [];
+}
+
+// =============================================
 // User Roles
 // =============================================
 
@@ -165,6 +175,17 @@ export async function getAllProfiles() {
 }
 
 export async function updateProfile(userId: string, updates: { nickname?: string; ic_name?: string }) {
+  const { error } = await supabase
+    .from('profiles')
+    .update(updates)
+    .eq('id', userId);
+  if (error) throw error;
+}
+
+export async function updateUserByAdmin(
+  userId: string,
+  updates: { nickname?: string; ic_name?: string; system_role?: string }
+) {
   const { error } = await supabase
     .from('profiles')
     .update(updates)
@@ -273,4 +294,15 @@ export async function getProfile(userId: string) {
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+export async function getWarnings(userId?: string): Promise<Array<{
+  id: string; reason: string; issued_at: string; is_active: boolean;
+  severity: string; expires_at: string | null; created_at: string;
+}>> {
+  let q = supabase.from('warnings').select('*').order('created_at', { ascending: false });
+  if (userId) q = q.eq('user_id', userId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
 }

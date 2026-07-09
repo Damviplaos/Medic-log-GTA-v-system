@@ -17,10 +17,10 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { UserPlus, Shield, User, Trash2, Plus, KeyRound } from 'lucide-react';
+import { UserPlus, Shield, User, Trash2, Plus, KeyRound, Pencil } from 'lucide-react';
 import {
   getAllProfiles, getUserRoles, assignRole, removeRole, createUserByAdmin,
-  deleteUserByAdmin, getRoles,
+  deleteUserByAdmin, getRoles, updateUserByAdmin,
 } from '@/services/adminService';
 import type { Profile, UserRole, Role } from '@/types/types';
 
@@ -47,8 +47,8 @@ function CreateUserDialog({ onCreated }: { onCreated: () => void }) {
       setOpen(false);
       setUsername(''); setPassword(''); setSysRole('user');
       onCreated();
-    } catch (err: any) {
-      toast.error(err.message || 'สร้างบัญชีไม่สำเร็จ');
+    } catch (err: unknown) {
+      toast.error((err as Error).message || 'สร้างบัญชีไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
@@ -104,6 +104,97 @@ function CreateUserDialog({ onCreated }: { onCreated: () => void }) {
 }
 
 // =============================================
+// Edit User Dialog
+// =============================================
+function EditUserDialog({ user, callerProfile, onUpdated }: {
+  user: Profile;
+  callerProfile: Profile | null;
+  onUpdated: (updated: Profile) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [nickname, setNickname] = useState(user.nickname ?? '');
+  const [icName, setIcName] = useState(user.ic_name ?? '');
+  const [sysRole, setSysRole] = useState(user.system_role);
+  const [loading, setLoading] = useState(false);
+
+  // reset when dialog opens
+  const handleOpen = (v: boolean) => {
+    if (v) {
+      setNickname(user.nickname ?? '');
+      setIcName(user.ic_name ?? '');
+      setSysRole(user.system_role);
+    }
+    setOpen(v);
+  };
+
+  const handleSave = async () => {
+    setLoading(true);
+    try {
+      await updateUserByAdmin(user.id, {
+        nickname: nickname.trim() || null,
+        ic_name: icName.trim() || null,
+        system_role: sysRole,
+      } as { nickname?: string; ic_name?: string; system_role?: string });
+      toast.success(`อัปเดตข้อมูล "${user.username}" สำเร็จ`);
+      onUpdated({ ...user, nickname: nickname.trim() || null, ic_name: icName.trim() || null, system_role: sysRole });
+      setOpen(false);
+    } catch (err: unknown) {
+      toast.error((err as Error).message || 'อัปเดตข้อมูลไม่สำเร็จ');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:text-foreground">
+          <Pencil className="w-3.5 h-3.5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-md">
+        <DialogHeader>
+          <DialogTitle>แก้ไขข้อมูล — {user.username}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground uppercase tracking-wider">ชื่อเล่น (Nickname)</Label>
+            <Input value={nickname} onChange={e => setNickname(e.target.value)}
+              placeholder="ชื่อเล่น" className="bg-muted border-border" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground uppercase tracking-wider">ชื่อในเกม (IC Name)</Label>
+            <Input value={icName} onChange={e => setIcName(e.target.value)}
+              placeholder="ชื่อตัวละครในเกม" className="bg-muted border-border" />
+          </div>
+          {callerProfile?.system_role === 'super_admin' && user.system_role !== 'super_admin' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">ระดับสิทธิ์</Label>
+              <Select value={sysRole} onValueChange={v => setSysRole(v as Profile['system_role'])}>
+                <SelectTrigger className="bg-muted border-border">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">User</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>ยกเลิก</Button>
+            <Button size="sm" onClick={handleSave} disabled={loading}
+              className="bg-primary text-primary-foreground hover:opacity-90">
+              {loading ? 'กำลังบันทึก...' : 'บันทึก'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// =============================================
 // Reset Password Dialog
 // =============================================
 function ResetPasswordDialog({ user }: { user: Profile }) {
@@ -115,7 +206,6 @@ function ResetPasswordDialog({ user }: { user: Profile }) {
     if (newPass.length < 6) { toast.error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'); return; }
     setLoading(true);
     try {
-      // Uses edge function change-password (service role)
       const { data, error } = await import('@/db/supabase').then(m => m.supabase.functions.invoke('change-password', {
         body: { user_id: user.id, new_password: newPass },
         method: 'POST',
@@ -125,8 +215,8 @@ function ResetPasswordDialog({ user }: { user: Profile }) {
       toast.success(`เปลี่ยนรหัสผ่านของ ${user.username} สำเร็จ`);
       setOpen(false);
       setNewPass('');
-    } catch (err: any) {
-      toast.error(err.message || 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
+    } catch (err: unknown) {
+      toast.error((err as Error).message || 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
@@ -252,7 +342,7 @@ function UserRolePanel({ user, allRoles, callerProfile }: { user: Profile; allRo
 // Main User Management Page
 // =============================================
 export default function UserManagementPage() {
-  const { profile } = useAuth();
+  const { profile, hasPermission } = useAuth();
   const [users, setUsers] = useState<Profile[]>([]);
   const [allRoles, setAllRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -283,22 +373,40 @@ export default function UserManagementPage() {
       setUsers(prev => prev.filter(u => u.id !== userToDelete.id));
       toast.success(`ลบผู้ใช้ "${userToDelete.username}" สำเร็จ`);
       setUserToDelete(null);
-    } catch (err: any) {
-      toast.error(err.message || 'ลบผู้ใช้ไม่สำเร็จ');
+    } catch (err: unknown) {
+      toast.error((err as Error).message || 'ลบผู้ใช้ไม่สำเร็จ');
     } finally {
       setDeleting(false);
     }
   };
 
+  const handleUserUpdated = (updated: Profile) => {
+    setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+  };
+
   const sysRoleLabel = (r: string) =>
     r === 'super_admin' ? 'Super Admin' : r === 'admin' ? 'Admin' : 'User';
 
+  const sysRoleBadgeClass = (r: string) =>
+    r === 'super_admin'
+      ? 'border-primary/50 text-primary'
+      : r === 'admin'
+        ? 'border-warning/50 text-warning'
+        : '';
+
+  // A target user can be managed if caller has enough privilege
   const canManage = (target: Profile) => {
     if (!profile) return false;
     if (profile.system_role === 'super_admin') return true;
     if (profile.system_role === 'admin' && target.system_role === 'user') return true;
     return false;
   };
+
+  const canCreate = hasPermission('create_users');
+  const canEdit = hasPermission('edit_users');
+  const canDelete = hasPermission('delete_users');
+  const canChangePass = hasPermission('change_others_password');
+  const canAssignRoles = hasPermission('assign_roles');
 
   return (
     <div className="p-4 space-y-4 max-w-3xl mx-auto">
@@ -307,7 +415,7 @@ export default function UserManagementPage() {
           <h1 className="text-lg font-bold text-foreground">จัดการผู้ใช้งาน</h1>
           <p className="text-xs text-muted-foreground">{users.length} บัญชี</p>
         </div>
-        <CreateUserDialog onCreated={loadData} />
+        {canCreate && <CreateUserDialog onCreated={loadData} />}
       </div>
 
       {loading ? (
@@ -328,7 +436,7 @@ export default function UserManagementPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold text-foreground truncate">{u.username}</p>
                         {u.nickname && <span className="text-xs text-muted-foreground">({u.nickname})</span>}
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${sysRoleBadgeClass(u.system_role)}`}>
                           {sysRoleLabel(u.system_role)}
                         </Badge>
                       </div>
@@ -340,27 +448,34 @@ export default function UserManagementPage() {
                   <div className="flex items-center gap-1 shrink-0">
                     {canManage(u) && (
                       <>
-                        <ResetPasswordDialog user={u} />
-                        <Button
-                          variant="ghost" size="icon"
-                          className="w-7 h-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => setUserToDelete(u)}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
+                        {canEdit && (
+                          <EditUserDialog user={u} callerProfile={profile} onUpdated={handleUserUpdated} />
+                        )}
+                        {canChangePass && <ResetPasswordDialog user={u} />}
+                        {canDelete && (
+                          <Button
+                            variant="ghost" size="icon"
+                            className="w-7 h-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setUserToDelete(u)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
                       </>
                     )}
-                    <Button
-                      variant="outline" size="sm"
-                      className="text-xs h-7"
-                      onClick={() => setExpandedUser(expandedUser === u.id ? null : u.id)}
-                    >
-                      <Shield className="w-3 h-3 mr-1" />
-                      {expandedUser === u.id ? 'ปิด' : 'ยศ'}
-                    </Button>
+                    {canAssignRoles && (
+                      <Button
+                        variant="outline" size="sm"
+                        className="text-xs h-7"
+                        onClick={() => setExpandedUser(expandedUser === u.id ? null : u.id)}
+                      >
+                        <Shield className="w-3 h-3 mr-1" />
+                        {expandedUser === u.id ? 'ปิด' : 'ยศ'}
+                      </Button>
+                    )}
                   </div>
                 </div>
-                {expandedUser === u.id && (
+                {expandedUser === u.id && canAssignRoles && (
                   <div className="mt-3 pt-3 border-t border-border">
                     <UserRolePanel user={u} allRoles={allRoles} callerProfile={profile} />
                   </div>
@@ -396,3 +511,4 @@ export default function UserManagementPage() {
     </div>
   );
 }
+

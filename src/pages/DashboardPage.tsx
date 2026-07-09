@@ -4,23 +4,25 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Clock, Star, Calendar, TrendingUp, CheckCircle, ArrowLeft } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Clock, Star, Calendar, TrendingUp, CheckCircle, ArrowLeft, AlertTriangle, Banknote } from 'lucide-react';
 import {
   getWeeklyStats, getDailyStats, getWeekStart,
-  getUserRoles, refreshWeeklyStats, getProfile,
+  getUserRoles, refreshWeeklyStats, getProfile, getRoleCriteria, getWarnings,
 } from '@/services/adminService';
-import { getRoleCriteria } from '@/services/adminService';
 import type { WeeklyStats, UserRole, RoleCriteria, Role, Profile } from '@/types/types';
 import { toast } from 'sonner';
 
-// Format seconds to HH:mm
 function fmtTime(secs: number): string {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   return `${h}h ${m}m`;
 }
 
-// Get dates of current week (Mon-Sun)
+function fmtBaht(amount: number): string {
+  return amount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function getWeekDates(weekStart: string): string[] {
   const start = new Date(weekStart);
   return Array.from({ length: 7 }, (_, i) => {
@@ -31,14 +33,14 @@ function getWeekDates(weekStart: string): string[] {
 }
 
 export default function DashboardPage() {
-  const { user, profile: myProfile } = useAuth();
+  const { user, profile: myProfile, hasPermission } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  // If ?userId= param present and viewer is admin, show that user's dashboard
+  // If ?userId= param present and viewer has permission, show that user's dashboard
   const targetUserId = searchParams.get('userId') || user?.id || '';
   const isViewingOther = !!searchParams.get('userId') && searchParams.get('userId') !== user?.id;
-  const canViewOthers = myProfile?.system_role === 'super_admin' || myProfile?.system_role === 'admin';
+  const canViewOthers = hasPermission('view_member_dashboard');
 
   const [targetProfile, setTargetProfile] = useState<Profile | null>(null);
   const [weeklyStats, setWeeklyStats] = useState<WeeklyStats | null>(null);
@@ -47,7 +49,9 @@ export default function DashboardPage() {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [selectedDateStats, setSelectedDateStats] = useState<{ total_work_seconds: number; total_op_seconds: number } | null>(null);
   const [userRoles, setUserRoles] = useState<UserRole[]>([]);
+  const [criteria, setCriteria] = useState<RoleCriteria | null>(null);
   const [promotionEligible, setPromotionEligible] = useState(false);
+  const [warnings, setWarnings] = useState<{ id: string; reason: string; issued_at: string; is_active: boolean; severity: string; expires_at: string | null; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const weekStart = getWeekStart();
 
@@ -82,16 +86,23 @@ export default function DashboardPage() {
         op: dayStats[i]?.total_op_seconds ?? 0,
       })));
 
+      // Load active warnings
+      try {
+        const w = await getWarnings(targetUserId);
+        setWarnings(w.filter(x => x.is_active && (!x.expires_at || new Date(x.expires_at) >= new Date())));
+      } catch { setWarnings([]); }
+
       if (ur.length > 0) {
         const topRole = ur[ur.length - 1]?.role as Role | undefined;
         if (topRole) {
-          const criteria = await getRoleCriteria(topRole.id);
-          if (criteria && ws) {
+          const c = await getRoleCriteria(topRole.id);
+          setCriteria(c);
+          if (c && ws) {
             const workH = (ws.total_work_seconds ?? 0) / 3600;
             const opH = (ws.total_op_seconds ?? 0) / 3600;
-            const workOk = !criteria.work_hours_enabled || workH >= (criteria.min_work_hours_per_week ?? 0);
-            const opOk = !criteria.op_hours_enabled || opH >= (criteria.min_op_hours_per_week ?? 0);
-            setPromotionEligible(workOk && opOk && (criteria.work_hours_enabled || criteria.op_hours_enabled));
+            const workOk = !c.work_hours_enabled || workH >= (c.min_work_hours_per_week ?? 0);
+            const opOk = !c.op_hours_enabled || opH >= (c.min_op_hours_per_week ?? 0);
+            setPromotionEligible(workOk && opOk && (c.work_hours_enabled || c.op_hours_enabled));
           }
         }
       }
@@ -126,6 +137,10 @@ export default function DashboardPage() {
   const displayProfile = isViewingOther ? targetProfile : myProfile;
   const displayName = displayProfile?.nickname || displayProfile?.ic_name || displayProfile?.username || '...';
 
+  // Salary calc
+  const weeklyWorkHours = (weeklyStats?.total_work_seconds ?? 0) / 3600;
+  const estimatedSalary = criteria?.hourly_salary != null ? criteria.hourly_salary * weeklyWorkHours : null;
+
   return (
     <div className="p-4 max-w-3xl mx-auto space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -147,10 +162,26 @@ export default function DashboardPage() {
             </p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={loadData} className="text-xs shrink-0">
-          รีเฟรช
-        </Button>
+        <Button variant="outline" size="sm" onClick={loadData} className="text-xs shrink-0">รีเฟรช</Button>
       </div>
+
+      {/* Active warnings */}
+      {warnings.length > 0 && (
+        <div className="space-y-1.5">
+          {warnings.map(w => (
+            <div key={w.id} className="flex items-start gap-2.5 p-3 rounded-sm border border-destructive/40 bg-destructive/10">
+              <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-destructive">ใบเตือนที่ยังมีผล</p>
+                <p className="text-xs text-destructive/80 mt-0.5">{w.reason}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {new Date(w.created_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Promotion alert */}
       {promotionEligible && (
@@ -220,6 +251,22 @@ export default function DashboardPage() {
         </Card>
       </div>
 
+      {/* Salary estimate */}
+      {estimatedSalary !== null && (
+        <Card className="border-border border-primary/30 bg-primary/5">
+          <CardContent className="p-3 flex items-center gap-3">
+            <Banknote className="w-8 h-8 text-primary shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground">รายได้ประมาณการ (สัปดาห์นี้)</p>
+              <p className="text-xl font-bold text-primary">{fmtBaht(estimatedSalary)} ฿</p>
+              <p className="text-[11px] text-muted-foreground">
+                {fmtTime(weeklyStats?.total_work_seconds ?? 0)} × {fmtBaht(criteria!.hourly_salary!)} บาท/ชม.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Weekly bar chart */}
       <Card className="border-border">
         <CardHeader className="pb-2">
@@ -263,6 +310,11 @@ export default function DashboardPage() {
               <div className="p-3 rounded-sm bg-muted">
                 <p className="text-xs text-muted-foreground mb-1">ชั่วโมงทำงาน</p>
                 <p className="text-lg font-bold text-foreground">{fmtTime(selectedDateStats.total_work_seconds)}</p>
+                {criteria?.hourly_salary != null && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    ≈ {fmtBaht((selectedDateStats.total_work_seconds / 3600) * criteria.hourly_salary)} ฿
+                  </p>
+                )}
               </div>
               <div className="p-3 rounded-sm bg-muted">
                 <p className="text-xs text-muted-foreground mb-1">ชั่วโมง OP</p>

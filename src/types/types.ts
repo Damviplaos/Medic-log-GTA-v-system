@@ -74,6 +74,7 @@ export interface RoleCriteria {
   min_op_hours_per_week: number | null;
   work_hours_enabled: boolean;
   op_hours_enabled: boolean;
+  hourly_salary: number | null;
   created_at: string;
 }
 
