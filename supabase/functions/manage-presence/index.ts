@@ -74,7 +74,7 @@ Deno.serve(async (req: Request) => {
           .eq('user_id', user.id);
       }
 
-      // Insert new presence
+      // Insert new presence — always join with is_op=false
       const { data: newPresence, error: presenceError } = await supabaseAdmin
         .from('user_presence')
         .insert({
@@ -83,6 +83,7 @@ Deno.serve(async (req: Request) => {
           joined_channel_at: new Date().toISOString(),
           session_started_at: new Date().toISOString(),
           last_heartbeat: new Date().toISOString(),
+          is_op: false,
         })
         .select()
         .maybeSingle();

@@ -118,25 +118,7 @@ export default function LoginPage() {
           </CardContent>
         </Card>
 
-        {/* Test/demo accounts */}
-        <div className="mt-6 rounded-sm border border-border bg-card p-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-            บัญชีทดสอบ (Test Accounts)
-          </p>
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-foreground font-medium">superadmin</span>
-              <span className="font-mono text-muted-foreground">SuperAdmin@123</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-foreground font-medium">Outhai</span>
-              <span className="font-mono text-muted-foreground">56110669</span>
-            </div>
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-2">
-            ทั้งสองบัญชีมีสิทธิ์ Super Admin เท่าเทียมกัน
-          </p>
-        </div>
+
       </div>
     </div>
   );

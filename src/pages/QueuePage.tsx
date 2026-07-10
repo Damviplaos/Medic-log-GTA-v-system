@@ -15,6 +15,7 @@ import { ChevronRight, Shuffle, ArrowRight, Star, UserCheck, X } from 'lucide-re
 import type { PresenceWithProfile, Channel } from '@/types/types';
 import { getUserRoles } from '@/services/adminService';
 import { useEffect, useState, useRef } from 'react';
+import type { JSX } from 'react';
 import type { Role } from '@/types/types';
 
 // =============================================
@@ -181,6 +182,60 @@ function UserRow({
 }
 
 // =============================================
+// Paired combined row (two users merged into one)
+// =============================================
+function PairedRow({
+  me, partner, isPointed, channels, onSwitchChannel, onCancelPair,
+}: {
+  me: PresenceWithProfile;
+  partner: PresenceWithProfile;
+  isPointed: boolean;
+  channels: Channel[];
+  onSwitchChannel: (channelId: string) => void;
+  onCancelPair: () => void;
+}) {
+  const name = (p: PresenceWithProfile) =>
+    p.profile?.nickname || p.profile?.ic_name || p.profile?.username || '?';
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-sm bg-accent/10 border-l-2 border-accent group">
+      <span className="online-dot-static" />
+      <span className={`w-4 text-center text-sm transition-opacity ${isPointed ? 'opacity-100' : 'opacity-0'}`}>
+        👉
+      </span>
+      <UserCheck className="w-3.5 h-3.5 text-accent shrink-0" />
+      <span className="flex-1 min-w-0 text-sm text-accent font-semibold truncate">
+        {name(me)} + {name(partner)}
+        <span className="ml-1 text-xs text-accent/70 font-normal">[จับคู่]</span>
+      </span>
+      {/* Self menu */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded border border-transparent hover:border-border transition-colors shrink-0">
+            เมนู <ChevronRight className="w-3 h-3" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          {channels.map(ch => (
+            <DropdownMenuItem
+              key={ch.id}
+              onClick={() => onSwitchChannel(ch.id)}
+              disabled={ch.id === me.channel_id}
+              className={ch.id === me.channel_id ? 'opacity-50' : ''}
+            >
+              {ch.id === me.channel_id ? '✓ ' : ''}{ch.display_name}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={onCancelPair} className="text-destructive focus:text-destructive">
+            <X className="w-3.5 h-3.5 mr-2" /> ยกเลิกจับคู่
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+// =============================================
 // Channel section
 // =============================================
 interface ChannelSectionProps {
@@ -188,6 +243,7 @@ interface ChannelSectionProps {
   presences: PresenceWithProfile[];
   pointedUserId: string | null;
   myUserId: string;
+  isReadyChannel: boolean;
   channels: Channel[];
   allPresences: PresenceWithProfile[];
   myPairUserId: string | null;
@@ -197,9 +253,53 @@ interface ChannelSectionProps {
 }
 
 function ChannelSection({
-  channel, presences, pointedUserId, myUserId, channels, allPresences,
+  channel, presences, pointedUserId, myUserId, isReadyChannel, channels, allPresences,
   myPairUserId, onSwitchChannel, onStartPairing, onCancelPair,
 }: ChannelSectionProps) {
+  const myPresenceHere = presences.find(p => p.user_id === myUserId);
+  const partnerHere = myPairUserId ? presences.find(p => p.user_id === myPairUserId) : null;
+  const iAmHereAndPaired = !!myPresenceHere && !!partnerHere;
+
+  // Build rendered rows — merge paired users into one row when both are in this channel
+  const renderedRows: JSX.Element[] = [];
+  const skippedIds = new Set<string>();
+
+  for (const p of presences) {
+    if (skippedIds.has(p.user_id)) continue;
+    const isMe = p.user_id === myUserId;
+
+    if (isMe && iAmHereAndPaired && partnerHere) {
+      // Show merged row
+      skippedIds.add(partnerHere.user_id);
+      renderedRows.push(
+        <PairedRow
+          key={`pair-${p.id}`}
+          me={p}
+          partner={partnerHere}
+          isPointed={isReadyChannel && pointedUserId === p.user_id}
+          channels={channels}
+          onSwitchChannel={onSwitchChannel}
+          onCancelPair={onCancelPair}
+        />
+      );
+    } else {
+      renderedRows.push(
+        <UserRow
+          key={p.id}
+          presence={p}
+          isPointed={isReadyChannel && pointedUserId === p.user_id}
+          isMe={isMe}
+          channels={channels}
+          allPresences={allPresences}
+          myPairUserId={myPairUserId}
+          onSwitchChannel={onSwitchChannel}
+          onStartPairing={onStartPairing}
+          onCancelPair={onCancelPair}
+        />
+      );
+    }
+  }
+
   return (
     <div className="mb-1">
       <div className="flex items-center gap-2 px-3 py-1">
@@ -216,22 +316,7 @@ function ChannelSection({
       <div>
         {presences.length === 0 ? (
           <p className="text-xs text-muted-foreground px-3 py-1 italic">ว่างอยู่</p>
-        ) : (
-          presences.map(p => (
-            <UserRow
-              key={p.id}
-              presence={p}
-              isPointed={pointedUserId === p.user_id}
-              isMe={p.user_id === myUserId}
-              channels={channels}
-              allPresences={allPresences}
-              myPairUserId={myPairUserId}
-              onSwitchChannel={onSwitchChannel}
-              onStartPairing={onStartPairing}
-              onCancelPair={onCancelPair}
-            />
-          ))
-        )}
+        ) : renderedRows}
       </div>
       <div className="channel-divider mt-2" />
     </div>
@@ -395,6 +480,8 @@ export default function QueuePage() {
   const totalOnline = Object.values(presenceByChannel).flat().length;
   const partnerPresence = myPairUserId ? presenceList.find(p => p.user_id === myPairUserId) : null;
 
+  const readyChannel = channels.find(c => c.name === 'ready');
+
   return (
     <div className="p-3 md:p-4 max-w-2xl mx-auto">
       {/* Header */}
@@ -450,6 +537,7 @@ export default function QueuePage() {
               presences={presenceByChannel[ch.id] ?? []}
               pointedUserId={pointer?.pointed_user_id ?? null}
               myUserId={user?.id ?? ''}
+              isReadyChannel={ch.id === readyChannel?.id}
               channels={channels}
               allPresences={presenceList}
               myPairUserId={myPairUserId}

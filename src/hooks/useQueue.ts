@@ -91,6 +91,7 @@ export function useQueue() {
 
   const myPresence = presenceList.find(p => p.user_id === user?.id);
   const myChannel = channels.find(c => c.id === myPresence?.channel_id);
+  const readyChannel = channels.find(c => c.name === 'ready');
 
   const handleSwitchChannel = useCallback(async (channelId: string) => {
     try {
@@ -160,8 +161,8 @@ export function useQueue() {
     return acc;
   }, {});
 
-  // OP list
-  const opList = presenceList.filter(p => p.is_op);
+  // OP list — only from ready channel
+  const opList = presenceList.filter(p => p.is_op && p.channel_id === readyChannel?.id);
 
   return {
     presenceList,

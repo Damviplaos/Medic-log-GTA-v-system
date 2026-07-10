@@ -28,6 +28,8 @@ function Protected({ children, roles }: { children: ReactNode; roles?: SystemRol
   );
 }
 
+import WebSettingsPage from './pages/WebSettingsPage';
+
 export const routes: RouteConfig[] = [
   {
     name: 'Home',
@@ -70,6 +72,11 @@ export const routes: RouteConfig[] = [
     name: 'Warnings',
     path: '/admin/warnings',
     element: <Protected roles={['super_admin', 'admin', 'user']}><WarningsPage /></Protected>,
+  },
+  {
+    name: 'Web Settings',
+    path: '/admin/web-settings',
+    element: <Protected roles={['super_admin', 'admin']}><WebSettingsPage /></Protected>,
   },
   {
     name: 'Settings',

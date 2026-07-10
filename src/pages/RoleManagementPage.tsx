@@ -7,6 +7,9 @@ import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
@@ -23,7 +26,7 @@ import { PERMISSION_CATEGORIES } from '@/types/types';
 // =============================================
 // Role Criteria Editor
 // =============================================
-function RoleCriteriaEditor({ role }: { role: Role }) {
+function RoleCriteriaEditor({ role, allRoles }: { role: Role; allRoles: Role[] }) {
   const [criteria, setCriteria] = useState<Partial<RoleCriteria>>({
     role_id: role.id,
     work_hours_enabled: false,
@@ -31,6 +34,7 @@ function RoleCriteriaEditor({ role }: { role: Role }) {
     min_work_hours_per_week: 0,
     min_op_hours_per_week: 0,
     hourly_salary: null,
+    next_role_id: null,
   });
   const [saving, setSaving] = useState(false);
 
@@ -66,6 +70,27 @@ function RoleCriteriaEditor({ role }: { role: Role }) {
         เกณฑ์เลื่อนยศต่อสัปดาห์
       </p>
       <div className="space-y-2.5">
+        {/* Promotion target role */}
+        <div className="flex items-center justify-between gap-3 pb-2 border-b border-border/50">
+          <Label className="text-sm shrink-0">เลื่อนขึ้นเป็นยศ</Label>
+          <Select
+            value={criteria.next_role_id ?? 'none'}
+            onValueChange={v => setCriteria(c => ({ ...c, next_role_id: v === 'none' ? null : v }))}
+          >
+            <SelectTrigger className="h-7 text-xs bg-muted border-border w-40">
+              <SelectValue placeholder="ไม่กำหนด" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">ไม่กำหนด</SelectItem>
+              {allRoles.filter(r => r.id !== role.id).map(r => (
+                <SelectItem key={r.id} value={r.id}>
+                  <span style={{ color: r.color }}>{r.name}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-1">
             <Switch
@@ -216,6 +241,7 @@ interface RoleCardProps {
   role: Role;
   index: number;
   total: number;
+  allRoles: Role[];
   onDelete: (id: string) => void;
   onMove: (id: string, dir: 'up' | 'down') => void;
   onUpdate: (id: string, updates: Partial<Role>) => void;
@@ -223,7 +249,7 @@ interface RoleCardProps {
 
 type RoleTab = 'info' | 'criteria' | 'permissions';
 
-function RoleCard({ role, index, total, onDelete, onMove, onUpdate }: RoleCardProps) {
+function RoleCard({ role, index, total, allRoles, onDelete, onMove, onUpdate }: RoleCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<RoleTab>('info');
   const [editName, setEditName] = useState(role.name);
@@ -332,7 +358,7 @@ function RoleCard({ role, index, total, onDelete, onMove, onUpdate }: RoleCardPr
                 </div>
               )}
               {activeTab === 'criteria' && (
-                <RoleCriteriaEditor role={{ ...role, name: editName, color: editColor }} />
+                <RoleCriteriaEditor role={{ ...role, name: editName, color: editColor }} allRoles={allRoles} />
               )}
               {activeTab === 'permissions' && (
                 <PermissionsEditor roleId={role.id} />
@@ -580,6 +606,7 @@ export default function RoleManagementPage() {
               role={role}
               index={idx}
               total={roles.length}
+              allRoles={roles}
               onDelete={handleDelete}
               onMove={handleMove}
               onUpdate={handleUpdateLocal}

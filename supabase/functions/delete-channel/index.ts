@@ -65,6 +65,17 @@ Deno.serve(async (req: Request) => {
 
     const fallbackChannelId = otherChannels?.[0]?.id ?? null;
 
+    // Nullify presence_logs references to this channel
+    await supabaseAdmin
+      .from('presence_logs')
+      .update({ from_channel_id: null })
+      .eq('from_channel_id', channel_id);
+
+    await supabaseAdmin
+      .from('presence_logs')
+      .update({ to_channel_id: null })
+      .eq('to_channel_id', channel_id);
+
     // Move all users currently in this channel to fallback (if exists)
     if (fallbackChannelId) {
       await supabaseAdmin
