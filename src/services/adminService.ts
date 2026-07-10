@@ -32,8 +32,15 @@ export async function updateRole(id: string, updates: Partial<Pick<Role, 'name' 
 }
 
 export async function deleteRole(id: string) {
-  const { error } = await supabase.from('roles').delete().eq('id', id);
-  if (error) throw error;
+  const { data, error } = await supabase.functions.invoke('delete-role', {
+    body: { role_id: id },
+    method: 'POST',
+  });
+  if (error) {
+    const msg = await error?.context?.text?.();
+    throw new Error(msg || error.message);
+  }
+  if (data?.error) throw new Error(data.error);
 }
 
 export async function reorderRoles(orderedIds: string[]) {
@@ -184,13 +191,23 @@ export async function updateProfile(userId: string, updates: { nickname?: string
 
 export async function updateUserByAdmin(
   userId: string,
-  updates: { nickname?: string; ic_name?: string; system_role?: string }
+  updates: { nickname?: string | null; ic_name?: string | null; system_role?: string }
 ) {
-  const { error } = await supabase
-    .from('profiles')
-    .update(updates)
-    .eq('id', userId);
-  if (error) throw error;
+  const body: Record<string, unknown> = { user_id: userId };
+  if (Object.prototype.hasOwnProperty.call(updates, 'nickname')) body.nickname = updates.nickname ?? null;
+  if (Object.prototype.hasOwnProperty.call(updates, 'ic_name')) body.ic_name = updates.ic_name ?? null;
+  if (Object.prototype.hasOwnProperty.call(updates, 'system_role')) body.system_role = updates.system_role;
+
+  const { data, error } = await supabase.functions.invoke('update-user', {
+    body,
+    method: 'POST',
+  });
+  if (error) {
+    const msg = await error?.context?.text?.();
+    throw new Error(msg || error.message);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
 }
 
 export async function changePassword(newPassword: string) {

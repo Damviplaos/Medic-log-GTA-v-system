@@ -42,11 +42,13 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const role = profile?.system_role ?? 'user';
   const displayName = profile?.nickname || profile?.ic_name || profile?.username || 'ผู้ใช้';
 
-  // Show nav item if: system_role matches OR permission key is granted
+  // Show nav item based on permission key first; fall back to role-only items (no permission key).
+  // This ensures role_permissions toggles actually gate nav items for all system_roles.
+  // admin/super_admin: hasPermission always returns true, so they see everything.
+  // user: only sees items where their role_permissions grant the key, or items with no permission gate.
   const allowedNav = navItems.filter(n => {
-    if (n.roles.includes(role)) return true;
     if (n.permission) return hasPermission(n.permission);
-    return false;
+    return n.roles.includes(role);
   });
 
   const NavLinks = ({ onClose }: { onClose?: () => void }) => (

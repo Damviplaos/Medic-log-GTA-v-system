@@ -13,6 +13,23 @@ import {
 import type { WeeklyStats, UserRole, RoleCriteria, Role, Profile } from '@/types/types';
 import { toast } from 'sonner';
 
+// ── helpers ─────────────────────────────────────────────────────
+function addDays(dateStr: string, n: number): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split('T')[0];
+}
+
+function daysBetween(from: string, to: string): string[] {
+  const days: string[] = [];
+  let cur = from;
+  while (cur <= to) {
+    days.push(cur);
+    cur = addDays(cur, 1);
+  }
+  return days;
+}
+
 function fmtTime(secs: number): string {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
@@ -37,7 +54,6 @@ export default function DashboardPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  // If ?userId= param present and viewer has permission, show that user's dashboard
   const targetUserId = searchParams.get('userId') || user?.id || '';
   const isViewingOther = !!searchParams.get('userId') && searchParams.get('userId') !== user?.id;
   const canViewOthers = hasPermission('view_member_dashboard');
@@ -46,14 +62,21 @@ export default function DashboardPage() {
   const [weeklyStats, setWeeklyStats] = useState<WeeklyStats | null>(null);
   const [todayStats, setTodayStats] = useState<{ total_work_seconds: number; total_op_seconds: number } | null>(null);
   const [weekDayStats, setWeekDayStats] = useState<{ date: string; work: number; op: number }[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [selectedDateStats, setSelectedDateStats] = useState<{ total_work_seconds: number; total_op_seconds: number } | null>(null);
   const [userRoles, setUserRoles] = useState<UserRole[]>([]);
   const [criteria, setCriteria] = useState<RoleCriteria | null>(null);
   const [promotionEligible, setPromotionEligible] = useState(false);
   const [warnings, setWarnings] = useState<{ id: string; reason: string; issued_at: string; is_active: boolean; severity: string; expires_at: string | null; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const weekStart = getWeekStart();
+
+  // ── Date range state ──────────────────────────────────────────
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [rangeFrom, setRangeFrom] = useState<string>(addDays(todayStr, -6));
+  const [rangeTo, setRangeTo] = useState<string>(todayStr);
+  const [rangeStats, setRangeStats] = useState<{
+    work: number; op: number; days: { date: string; work: number; op: number }[];
+  } | null>(null);
+  const [rangeLoading, setRangeLoading] = useState(false);
 
   // Redirect if trying to view other without permission
   useEffect(() => {
@@ -69,7 +92,7 @@ export default function DashboardPage() {
       await refreshWeeklyStats(targetUserId);
       const [ws, td, ur, tp] = await Promise.all([
         getWeeklyStats(targetUserId, weekStart),
-        getDailyStats(targetUserId, new Date().toISOString().split('T')[0]),
+        getDailyStats(targetUserId, todayStr),
         getUserRoles(targetUserId),
         isViewingOther ? getProfile(targetUserId) : Promise.resolve(myProfile),
       ]);
@@ -86,7 +109,6 @@ export default function DashboardPage() {
         op: dayStats[i]?.total_op_seconds ?? 0,
       })));
 
-      // Load active warnings
       try {
         const w = await getWarnings(targetUserId);
         setWarnings(w.filter(x => x.is_active && (!x.expires_at || new Date(x.expires_at) >= new Date())));
@@ -111,14 +133,33 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [targetUserId, weekStart, isViewingOther, myProfile]);
+  }, [targetUserId, weekStart, todayStr, isViewingOther, myProfile]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  useEffect(() => {
-    if (!targetUserId || !selectedDate) return;
-    getDailyStats(targetUserId, selectedDate).then(setSelectedDateStats);
-  }, [targetUserId, selectedDate]);
+  // Load date-range stats whenever from/to changes
+  const loadRangeStats = useCallback(async () => {
+    if (!targetUserId || !rangeFrom || !rangeTo || rangeFrom > rangeTo) return;
+    setRangeLoading(true);
+    try {
+      const days = daysBetween(rangeFrom, rangeTo);
+      if (days.length > 90) { toast.error('ช่วงวันที่ไม่เกิน 90 วัน'); setRangeLoading(false); return; }
+      const stats = await Promise.all(days.map(d => getDailyStats(targetUserId, d)));
+      const perDay = days.map((d, i) => ({
+        date: d,
+        work: stats[i]?.total_work_seconds ?? 0,
+        op: stats[i]?.total_op_seconds ?? 0,
+      }));
+      setRangeStats({
+        work: perDay.reduce((s, d) => s + d.work, 0),
+        op: perDay.reduce((s, d) => s + d.op, 0),
+        days: perDay,
+      });
+    } catch { toast.error('โหลดสถิติช่วงวันที่ไม่สำเร็จ'); }
+    finally { setRangeLoading(false); }
+  }, [targetUserId, rangeFrom, rangeTo]);
+
+  useEffect(() => { loadRangeStats(); }, [loadRangeStats]);
 
   if (loading) {
     return (
@@ -137,9 +178,10 @@ export default function DashboardPage() {
   const displayProfile = isViewingOther ? targetProfile : myProfile;
   const displayName = displayProfile?.nickname || displayProfile?.ic_name || displayProfile?.username || '...';
 
-  // Salary calc
   const weeklyWorkHours = (weeklyStats?.total_work_seconds ?? 0) / 3600;
   const estimatedSalary = criteria?.hourly_salary != null ? criteria.hourly_salary * weeklyWorkHours : null;
+  const rangeWorkHours = (rangeStats?.work ?? 0) / 3600;
+  const rangeSalary = criteria?.hourly_salary != null ? criteria.hourly_salary * rangeWorkHours : null;
 
   return (
     <div className="p-4 max-w-3xl mx-auto space-y-4">
@@ -207,7 +249,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Stats cards */}
+      {/* This-week stats cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card className="border-border">
           <CardContent className="p-3">
@@ -251,7 +293,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Salary estimate */}
+      {/* Salary estimate (this week) */}
       {estimatedSalary !== null && (
         <Card className="border-border border-primary/30 bg-primary/5">
           <CardContent className="p-3 flex items-center gap-3">
@@ -290,36 +332,94 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* Calendar picker */}
+      {/* ── Date range picker ── */}
       <Card className="border-border">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
-            <Calendar className="w-4 h-4" /> ดูรายละเอียดย้อนหลัง
+            <Calendar className="w-4 h-4" /> ดูสถิติช่วงวันที่
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <input
-            type="date"
-            value={selectedDate}
-            max={new Date().toISOString().split('T')[0]}
-            onChange={e => setSelectedDate(e.target.value)}
-            className="bg-muted border border-border rounded-sm px-3 py-1.5 text-sm text-foreground w-full md:w-auto"
-          />
-          {selectedDateStats && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 rounded-sm bg-muted">
-                <p className="text-xs text-muted-foreground mb-1">ชั่วโมงทำงาน</p>
-                <p className="text-lg font-bold text-foreground">{fmtTime(selectedDateStats.total_work_seconds)}</p>
-                {criteria?.hourly_salary != null && (
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    ≈ {fmtBaht((selectedDateStats.total_work_seconds / 3600) * criteria.hourly_salary)} ฿
-                  </p>
-                )}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">จาก</span>
+              <input
+                type="date"
+                value={rangeFrom}
+                max={rangeTo}
+                onChange={e => setRangeFrom(e.target.value)}
+                className="bg-muted border border-border rounded-sm px-3 py-1.5 text-sm text-foreground"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">ถึง</span>
+              <input
+                type="date"
+                value={rangeTo}
+                min={rangeFrom}
+                max={todayStr}
+                onChange={e => setRangeTo(e.target.value)}
+                className="bg-muted border border-border rounded-sm px-3 py-1.5 text-sm text-foreground"
+              />
+            </div>
+            <Button size="sm" variant="outline" onClick={loadRangeStats} disabled={rangeLoading} className="text-xs h-8 shrink-0">
+              {rangeLoading ? 'กำลังโหลด...' : 'ดูข้อมูล'}
+            </Button>
+          </div>
+
+          {rangeStats && !rangeLoading && (
+            <div className="space-y-3">
+              {/* Aggregate */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-sm bg-muted">
+                  <p className="text-xs text-muted-foreground mb-1">ชั่วโมงทำงานรวม</p>
+                  <p className="text-lg font-bold text-foreground">{fmtTime(rangeStats.work)}</p>
+                  {rangeSalary !== null && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      ≈ {fmtBaht(rangeSalary)} ฿
+                    </p>
+                  )}
+                </div>
+                <div className="p-3 rounded-sm bg-muted">
+                  <p className="text-xs text-muted-foreground mb-1">ชั่วโมง OP รวม</p>
+                  <p className="text-lg font-bold text-foreground">{fmtTime(rangeStats.op)}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{rangeStats.days.length} วัน</p>
+                </div>
               </div>
-              <div className="p-3 rounded-sm bg-muted">
-                <p className="text-xs text-muted-foreground mb-1">ชั่วโมง OP</p>
-                <p className="text-lg font-bold text-foreground">{fmtTime(selectedDateStats.total_op_seconds)}</p>
-              </div>
+
+              {/* Per-day breakdown (compact) */}
+              {rangeStats.days.some(d => d.work > 0 || d.op > 0) && (
+                <div className="rounded-sm border border-border overflow-hidden">
+                  <div className="px-3 py-1.5 border-b border-border bg-muted/40">
+                    <p className="text-xs font-semibold text-muted-foreground">รายละเอียดรายวัน</p>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {rangeStats.days.filter(d => d.work > 0 || d.op > 0).map(d => (
+                      <div key={d.date} className="flex items-center justify-between px-3 py-1.5 border-b border-border/50 last:border-0 text-xs">
+                        <span className="text-muted-foreground shrink-0">
+                          {new Date(d.date + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}
+                        </span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-foreground font-mono">{fmtTime(d.work)}</span>
+                          {d.op > 0 && (
+                            <span className="text-warning font-mono">OP {fmtTime(d.op)}</span>
+                          )}
+                          {criteria?.hourly_salary != null && d.work > 0 && (
+                            <span className="text-primary font-mono">{fmtBaht((d.work / 3600) * criteria.hourly_salary)} ฿</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {rangeLoading && (
+            <div className="space-y-2">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-12 w-full" />
             </div>
           )}
         </CardContent>

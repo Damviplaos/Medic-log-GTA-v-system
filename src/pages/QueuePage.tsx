@@ -2,15 +2,19 @@ import { useQueue } from '@/hooks/useQueue';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { ChevronRight, Shuffle, ArrowRight, Star, Users } from 'lucide-react';
+import { ChevronRight, Shuffle, ArrowRight, Star, UserCheck, X } from 'lucide-react';
 import type { PresenceWithProfile, Channel } from '@/types/types';
 import { getUserRoles } from '@/services/adminService';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import type { Role } from '@/types/types';
 
 // =============================================
@@ -34,6 +38,57 @@ function UserRolesBadges({ userId }: { userId: string }) {
 }
 
 // =============================================
+// Pairing picker dialog
+// =============================================
+interface PairingPickerProps {
+  open: boolean;
+  onClose: () => void;
+  onSelect: (presence: PresenceWithProfile) => void;
+  allPresences: PresenceWithProfile[];
+  myUserId: string;
+}
+
+function PairingPicker({ open, onClose, onSelect, allPresences, myUserId }: PairingPickerProps) {
+  const others = allPresences.filter(p => p.user_id !== myUserId);
+  const getName = (p: PresenceWithProfile) =>
+    p.profile?.nickname || p.profile?.ic_name || p.profile?.username || '?';
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCheck className="w-4 h-4 text-primary" /> เลือกคู่ที่ต้องการจับคู่
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+          {others.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">ไม่มีผู้ใช้ออนไลน์</p>
+          ) : (
+            others.map(p => (
+              <button
+                key={p.user_id}
+                onClick={() => { onSelect(p); onClose(); }}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-sm hover:bg-muted/60 transition-colors text-left"
+              >
+                <span className="online-dot-static shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{getName(p)}</p>
+                  {p.channel?.display_name && (
+                    <p className="text-xs text-muted-foreground truncate">{p.channel.display_name}</p>
+                  )}
+                </div>
+                {p.is_op && <Star className="w-3.5 h-3.5 text-warning fill-warning shrink-0" />}
+              </button>
+            ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// =============================================
 // Single user row inside a channel
 // =============================================
 interface UserRowProps {
@@ -41,46 +96,50 @@ interface UserRowProps {
   isPointed: boolean;
   isMe: boolean;
   channels: Channel[];
+  allPresences: PresenceWithProfile[];
+  myPairUserId: string | null;
   onSwitchChannel: (channelId: string) => void;
+  onStartPairing: () => void;
+  onCancelPair: () => void;
 }
 
-function UserRow({ presence, isPointed, isMe, channels, onSwitchChannel }: UserRowProps) {
+function UserRow({
+  presence, isPointed, isMe, channels, allPresences,
+  myPairUserId, onSwitchChannel, onStartPairing, onCancelPair,
+}: UserRowProps) {
   const displayName = presence.profile?.nickname || presence.profile?.ic_name || presence.profile?.username || '?';
+  const isPaired = myPairUserId !== null;
+
+  // Highlight pair partner row
+  const isMyPartner = !isMe && presence.user_id === myPairUserId;
 
   return (
     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-sm group transition-colors
-      ${isMe ? 'bg-primary/5' : 'hover:bg-muted/50'}
+      ${isMe ? 'bg-primary/5' : isMyPartner ? 'bg-accent/10 border-l-2 border-accent' : 'hover:bg-muted/50'}
     `}>
-      {/* Online dot */}
       <span className="online-dot-static" />
-
-      {/* Pointer */}
       <span className={`w-4 text-center text-sm transition-opacity ${isPointed ? 'opacity-100' : 'opacity-0'}`}>
         👉
       </span>
-
-      {/* OP star */}
       {presence.is_op && (
         <Star className="w-3.5 h-3.5 text-warning fill-warning shrink-0" />
       )}
-
-      {/* Name */}
-      <span className={`flex-1 min-w-0 text-sm ${isMe ? 'text-primary font-semibold' : 'text-foreground'} truncate`}>
+      {isMyPartner && (
+        <UserCheck className="w-3.5 h-3.5 text-accent shrink-0" />
+      )}
+      <span className={`flex-1 min-w-0 text-sm ${isMe ? 'text-primary font-semibold' : isMyPartner ? 'text-accent font-semibold' : 'text-foreground'} truncate`}>
         {displayName}
         {isMe && <span className="ml-1 text-xs text-muted-foreground">(คุณ)</span>}
+        {isMyPartner && <span className="ml-1 text-xs text-accent/70">[คู่ของคุณ]</span>}
       </span>
-
-      {/* Role badges */}
       <UserRolesBadges userId={presence.user_id} />
-
-      {/* IC name */}
       {presence.profile?.ic_name && presence.profile.ic_name !== displayName && (
         <span className="text-xs text-muted-foreground hidden md:block truncate max-w-24">
           [{presence.profile.ic_name}]
         </span>
       )}
 
-      {/* Switch channel menu — only for self */}
+      {/* Switch channel + pair menu — only for self */}
       {isMe && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -88,7 +147,8 @@ function UserRow({ presence, isPointed, isMe, channels, onSwitchChannel }: UserR
               เมนู <ChevronRight className="w-3 h-3" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent align="end" className="w-48">
+            {/* Channel switch items */}
             {channels.map(ch => (
               <DropdownMenuItem
                 key={ch.id}
@@ -99,58 +159,22 @@ function UserRow({ presence, isPointed, isMe, channels, onSwitchChannel }: UserR
                 {ch.id === presence.channel_id ? '✓ ' : ''}{ch.display_name}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuSeparator />
+            {/* Pairing options */}
+            {isPaired ? (
+              <DropdownMenuItem
+                onClick={onCancelPair}
+                className="text-destructive focus:text-destructive"
+              >
+                <X className="w-3.5 h-3.5 mr-2" /> ยกเลิกจับคู่
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onClick={onStartPairing} disabled={allPresences.filter(p => p.user_id !== presence.user_id).length === 0}>
+                <UserCheck className="w-3.5 h-3.5 mr-2" /> จับคู่กับ...
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
-      )}
-    </div>
-  );
-}
-
-// =============================================
-// Channel matching (จับคู่)
-// =============================================
-function ChannelMatching({ presences }: { presences: PresenceWithProfile[] }) {
-  const [pairs, setPairs] = useState<Array<[PresenceWithProfile, PresenceWithProfile]>>([]);
-
-  const doMatch = useCallback(() => {
-    if (presences.length < 2) {
-      toast.error('ต้องมีสมาชิกอย่างน้อย 2 คนในห้องนี้');
-      return;
-    }
-    const shuffled = [...presences].sort(() => Math.random() - 0.5);
-    const newPairs: Array<[PresenceWithProfile, PresenceWithProfile]> = [];
-    for (let i = 0; i + 1 < shuffled.length; i += 2) {
-      newPairs.push([shuffled[i], shuffled[i + 1]]);
-    }
-    setPairs(newPairs);
-    toast.success(`จับคู่สำเร็จ ${newPairs.length} คู่`);
-  }, [presences]);
-
-  const displayName = (p?: PresenceWithProfile) =>
-    p?.profile?.nickname || p?.profile?.ic_name || p?.profile?.username || '—';
-
-  return (
-    <div className="px-3 py-2 mt-1 rounded-sm border border-dashed border-border bg-muted/30">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Users className="w-3.5 h-3.5" />
-          <span>ระบบจับคู่</span>
-        </div>
-        <Button variant="outline" size="sm" onClick={doMatch} disabled={presences.length < 2}
-          className="h-6 text-[11px] px-2 border-border">
-          สุ่มจับคู่
-        </Button>
-      </div>
-      {pairs.length > 0 && (
-        <div className="mt-2 space-y-1">
-          {pairs.map((pair, idx) => (
-            <div key={idx} className="flex items-center gap-2 text-xs">
-              <span className="text-foreground font-medium truncate">{displayName(pair[0])}</span>
-              <span className="text-muted-foreground">+</span>
-              <span className="text-foreground font-medium truncate">{displayName(pair[1])}</span>
-            </div>
-          ))}
-        </div>
       )}
     </div>
   );
@@ -165,13 +189,19 @@ interface ChannelSectionProps {
   pointedUserId: string | null;
   myUserId: string;
   channels: Channel[];
+  allPresences: PresenceWithProfile[];
+  myPairUserId: string | null;
   onSwitchChannel: (channelId: string) => void;
+  onStartPairing: () => void;
+  onCancelPair: () => void;
 }
 
-function ChannelSection({ channel, presences, pointedUserId, myUserId, channels, onSwitchChannel }: ChannelSectionProps) {
+function ChannelSection({
+  channel, presences, pointedUserId, myUserId, channels, allPresences,
+  myPairUserId, onSwitchChannel, onStartPairing, onCancelPair,
+}: ChannelSectionProps) {
   return (
     <div className="mb-1">
-      {/* Channel header */}
       <div className="flex items-center gap-2 px-3 py-1">
         <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
           {channel.display_name}
@@ -183,7 +213,6 @@ function ChannelSection({ channel, presences, pointedUserId, myUserId, channels,
           </Badge>
         )}
       </div>
-      {/* Users */}
       <div>
         {presences.length === 0 ? (
           <p className="text-xs text-muted-foreground px-3 py-1 italic">ว่างอยู่</p>
@@ -195,13 +224,15 @@ function ChannelSection({ channel, presences, pointedUserId, myUserId, channels,
               isPointed={pointedUserId === p.user_id}
               isMe={p.user_id === myUserId}
               channels={channels}
+              allPresences={allPresences}
+              myPairUserId={myPairUserId}
               onSwitchChannel={onSwitchChannel}
+              onStartPairing={onStartPairing}
+              onCancelPair={onCancelPair}
             />
           ))
         )}
       </div>
-      {/* Matching system at the end of member list */}
-      <ChannelMatching presences={presences} />
       <div className="channel-divider mt-2" />
     </div>
   );
@@ -287,10 +318,64 @@ function OPBox({ opList, myPresence, onToggleOP, onRandom, onNext }: OPBoxProps)
 export default function QueuePage() {
   const { user } = useAuth();
   const {
-    presenceByChannel, channels, pointer, myPresence,
+    presenceList, presenceByChannel, channels, pointer, myPresence,
     opList, loading, handleSwitchChannel, handleToggleOP,
     handleNextPointer, handleRandomOP,
   } = useQueue();
+
+  // ── Pairing state ──────────────────────────────────────────────
+  // myPairUserId: the other user we're paired with (null = no pair)
+  const [myPairUserId, setMyPairUserId] = useState<string | null>(null);
+  const [pairingPickerOpen, setPairingPickerOpen] = useState(false);
+
+  // Track my current channel to detect room moves
+  const myChannelIdRef = useRef<string | null>(null);
+  const prevMyPresence = useRef<PresenceWithProfile | null>(null);
+
+  useEffect(() => {
+    if (!myPresence) return;
+    const prev = prevMyPresence.current;
+    // If I moved rooms, cancel pair
+    if (prev && prev.channel_id !== myPresence.channel_id && myPairUserId !== null) {
+      setMyPairUserId(null);
+      toast.info('การจับคู่ถูกยกเลิกเนื่องจากคุณย้ายห้อง');
+    }
+    prevMyPresence.current = myPresence;
+    myChannelIdRef.current = myPresence.channel_id;
+  }, [myPresence, myPairUserId]);
+
+  // Watch partner channel changes → cancel if partner moved
+  const partnerRef = useRef<string | null>(null);
+  partnerRef.current = myPairUserId;
+
+  useEffect(() => {
+    if (!myPairUserId) return;
+    const partner = presenceList.find(p => p.user_id === myPairUserId);
+    if (!partner) {
+      // Partner went offline
+      setMyPairUserId(null);
+      toast.info('คู่ของคุณออกจากระบบ — การจับคู่ถูกยกเลิก');
+      return;
+    }
+    // Partner changed channel from mine
+    if (myPresence && partner.channel_id !== myPresence.channel_id) {
+      // Only cancel if they were previously in the same channel
+      setMyPairUserId(null);
+      toast.info(`${partner.profile?.nickname || partner.profile?.username || 'คู่ของคุณ'} ย้ายห้อง — การจับคู่ถูกยกเลิก`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presenceList]);
+
+  const handleSelectPair = (presence: PresenceWithProfile) => {
+    setMyPairUserId(presence.user_id);
+    const name = presence.profile?.nickname || presence.profile?.username || '?';
+    toast.success(`จับคู่กับ "${name}" สำเร็จ`);
+  };
+
+  const handleCancelPair = () => {
+    setMyPairUserId(null);
+    toast.info('ยกเลิกการจับคู่แล้ว');
+  };
 
   if (loading) {
     return (
@@ -308,6 +393,7 @@ export default function QueuePage() {
   }
 
   const totalOnline = Object.values(presenceByChannel).flat().length;
+  const partnerPresence = myPairUserId ? presenceList.find(p => p.user_id === myPairUserId) : null;
 
   return (
     <div className="p-3 md:p-4 max-w-2xl mx-auto">
@@ -323,6 +409,24 @@ export default function QueuePage() {
           </p>
         </div>
       </div>
+
+      {/* Active pair banner */}
+      {myPairUserId && partnerPresence && (
+        <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2 rounded-sm border border-accent/40 bg-accent/10">
+          <div className="flex items-center gap-2">
+            <UserCheck className="w-4 h-4 text-accent shrink-0" />
+            <span className="text-sm text-accent font-semibold">
+              จับคู่กับ: {partnerPresence.profile?.nickname || partnerPresence.profile?.username}
+            </span>
+            {partnerPresence.channel?.display_name && (
+              <span className="text-xs text-muted-foreground">({partnerPresence.channel.display_name})</span>
+            )}
+          </div>
+          <button onClick={handleCancelPair} className="text-xs text-destructive hover:underline shrink-0">
+            ยกเลิก
+          </button>
+        </div>
+      )}
 
       {/* OP Box */}
       <OPBox
@@ -347,14 +451,27 @@ export default function QueuePage() {
               pointedUserId={pointer?.pointed_user_id ?? null}
               myUserId={user?.id ?? ''}
               channels={channels}
+              allPresences={presenceList}
+              myPairUserId={myPairUserId}
               onSwitchChannel={(cid) => {
                 handleSwitchChannel(cid);
                 toast.success(`ย้ายไป ${channels.find(c => c.id === cid)?.display_name || ''}`);
               }}
+              onStartPairing={() => setPairingPickerOpen(true)}
+              onCancelPair={handleCancelPair}
             />
           ))}
         </div>
       </div>
+
+      {/* Pairing picker dialog */}
+      <PairingPicker
+        open={pairingPickerOpen}
+        onClose={() => setPairingPickerOpen(false)}
+        onSelect={handleSelectPair}
+        allPresences={presenceList}
+        myUserId={user?.id ?? ''}
+      />
     </div>
   );
 }

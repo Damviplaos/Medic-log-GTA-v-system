@@ -114,12 +114,15 @@ export async function addChannel(displayName: string): Promise<Channel> {
 }
 
 export async function deleteChannel(channelId: string) {
-  // user_presence CASCADE deletes automatically via DB FK; time_logs channel_id set to NULL
-  const { error } = await supabase
-    .from('channels')
-    .delete()
-    .eq('id', channelId);
-  if (error) throw error;
+  const { data, error } = await supabase.functions.invoke('delete-channel', {
+    body: { channel_id: channelId },
+    method: 'POST',
+  });
+  if (error) {
+    const msg = await error?.context?.text?.();
+    throw new Error(msg || error.message);
+  }
+  if (data?.error) throw new Error(data.error);
 }
 
 // =============================================
