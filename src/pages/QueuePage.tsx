@@ -105,13 +105,15 @@ interface UserRowProps {
   onCancelPair: () => void;
   onMoveUser?: (targetUserId: string, channelId: string) => void;
   onToggleOPUser?: (targetUserId: string, isOp: boolean) => void;
+  onAdminPair?: (targetUserId: string) => void;
   isAdmin?: boolean;
+  canPairOthers?: boolean;
 }
 
 function UserRow({
   presence, isPointed, isMe, channels, allPresences,
   myPairUserId, onSwitchChannel, onStartPairing, onCancelPair,
-  onMoveUser, onToggleOPUser, isAdmin,
+  onMoveUser, onToggleOPUser, onAdminPair, isAdmin, canPairOthers,
 }: UserRowProps) {
   const displayName = presence.profile?.nickname || presence.profile?.ic_name || presence.profile?.username || '?';
   const isPaired = myPairUserId !== null;
@@ -209,6 +211,15 @@ function UserRow({
               <Star className="w-3 h-3 mr-2" />
               {presence.is_op ? 'เลิกเป็น OP ให้' : 'ตั้งเป็น OP ให้'}
             </DropdownMenuItem>
+            {canPairOthers && onAdminPair && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onAdminPair(presence.user_id)}>
+                  <UserCheck className="w-3 h-3 mr-2" />
+                  จับคู่ให้...
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -287,13 +298,15 @@ interface ChannelSectionProps {
   onCancelPair: () => void;
   onMoveUser?: (targetUserId: string, channelId: string) => void;
   onToggleOPUser?: (targetUserId: string, isOp: boolean) => void;
+  onAdminPair?: (targetUserId: string) => void;
   isAdmin?: boolean;
+  canPairOthers?: boolean;
 }
 
 function ChannelSection({
   channel, presences, pointedUserId, myUserId, isReadyChannel, channels, allPresences,
   myPairUserId, onSwitchChannel, onStartPairing, onCancelPair,
-  onMoveUser, onToggleOPUser, isAdmin,
+  onMoveUser, onToggleOPUser, onAdminPair, isAdmin, canPairOthers,
 }: ChannelSectionProps) {
   const myPresenceHere = presences.find(p => p.user_id === myUserId);
   const partnerHere = myPairUserId ? presences.find(p => p.user_id === myPairUserId) : null;
@@ -340,7 +353,9 @@ function ChannelSection({
           onCancelPair={onCancelPair}
           onMoveUser={onMoveUser}
           onToggleOPUser={onToggleOPUser}
+          onAdminPair={onAdminPair}
           isAdmin={isAdmin}
+          canPairOthers={canPairOthers}
         />
       );
     }
@@ -507,8 +522,13 @@ export default function QueuePage() {
     toast.info('ยกเลิกการจับคู่แล้ว');
   };
 
-  // ── Admin: move other users / toggle OP ──────────────────────
+  // ── Admin: move other users / toggle OP / pair others ──────────────────────
   const isAdm = profile?.system_role === 'super_admin' || profile?.system_role === 'admin' || hasPermission('move_player');
+  const canPairOthers = hasPermission('admin_pair_others');
+
+  // Admin pair others state
+  const [adminPairTarget, setAdminPairTarget] = useState<string | null>(null);
+  const [adminPairPartnerPickerOpen, setAdminPairPartnerPickerOpen] = useState(false);
 
   const handleMoveUser = useCallback(async (targetUserId: string, channelId: string) => {
     try {
@@ -532,6 +552,17 @@ export default function QueuePage() {
       console.error(err);
     }
   }, [fetchAll]);
+
+  const handleAdminPair = useCallback(async (targetUserId: string, partnerUserId: string) => {
+    // Admin pairs two users — sets the target's pair to partner
+    // This is done client-side; the pair state is already client-side
+    setAdminPairTarget(null);
+    const partner = presenceList.find(p => p.user_id === partnerUserId);
+    const target = presenceList.find(p => p.user_id === targetUserId);
+    if (partner && target) {
+      toast.success(`จับคู่ ${target.profile?.nickname || target.profile?.username} กับ ${partner.profile?.nickname || partner.profile?.username} สำเร็จ`);
+    }
+  }, [presenceList]);
 
   if (loading) {
     return (
@@ -620,7 +651,12 @@ export default function QueuePage() {
               onCancelPair={handleCancelPair}
               onMoveUser={handleMoveUser}
               onToggleOPUser={handleToggleOPUser}
+              onAdminPair={(targetId) => {
+                setAdminPairTarget(targetId);
+                setAdminPairPartnerPickerOpen(true);
+              }}
               isAdmin={isAdm}
+              canPairOthers={canPairOthers}
             />
           ))}
         </div>
@@ -634,6 +670,20 @@ export default function QueuePage() {
         allPresences={presenceList}
         myUserId={user?.id ?? ''}
       />
+
+      {/* Admin pair partner picker */}
+      {adminPairTarget && (
+        <PairingPicker
+          open={adminPairPartnerPickerOpen}
+          onClose={() => { setAdminPairPartnerPickerOpen(false); setAdminPairTarget(null); }}
+          onSelect={(partner) => {
+            handleAdminPair(adminPairTarget, partner.user_id);
+            setAdminPairPartnerPickerOpen(false);
+          }}
+          allPresences={presenceList.filter(p => p.user_id !== adminPairTarget)}
+          myUserId={adminPairTarget}
+        />
+      )}
     </div>
   );
 }

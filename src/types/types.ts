@@ -4,12 +4,23 @@
 
 export type SystemRole = 'super_admin' | 'admin' | 'user';
 
+export interface Team {
+  id: string;
+  name: string;
+  invite_code: string;
+  owner_id: string;
+  team_type: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Profile {
   id: string;
   username: string;
   nickname: string | null;
   ic_name: string | null;
   system_role: SystemRole;
+  team_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -199,6 +210,16 @@ export const PERMISSION_CATEGORIES: PermissionCategory[] = [
       { key: 'manage_roles', label: 'จัดการยศ', description: 'สร้าง แก้ไข ลบ ยศในระบบ' },
       { key: 'manage_channels', label: 'จัดการห้อง', description: 'เพิ่ม แก้ไข ลบ ห้องคาเฟ่' },
       { key: 'manage_system_settings', label: 'ตั้งค่าระบบ', description: 'แก้ไขการตั้งค่าทั่วไปของระบบ' },
+      { key: 'delete_time_logs', label: 'ลบข้อมูลเวลา', description: 'ลบข้อมูลเวลาทำงานรายบุคคล' },
+    ],
+  },
+  {
+    category: 'จับคู่และทีม (Pairing & Teams)',
+    icon: '🤝',
+    permissions: [
+      { key: 'admin_pair_others', label: 'จับคู่ให้ผู้อื่น', description: 'Admin สามารถจับคู่ให้สมาชิกคนอื่นได้' },
+      { key: 'view_presence_history', label: 'ดูประวัติห้อง', description: 'ดูประวัติการย้ายห้องของสมาชิก' },
+      { key: 'manage_teams', label: 'จัดการทีม', description: 'สร้าง ลบ และจัดการทีม/แผนก' },
     ],
   },
 ];

@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Sliders, Clock, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/db/supabase';
+import { useTeam } from '@/contexts/TeamContext';
 
 // =============================================
 // System settings helpers
@@ -31,6 +32,7 @@ async function setSystemSetting(key: string, value: string): Promise<void> {
 // Web Settings Page
 // =============================================
 export default function WebSettingsPage() {
+  const { currentTeam } = useTeam();
   const [minHours, setMinHours] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -38,21 +40,31 @@ export default function WebSettingsPage() {
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const val = await getSystemSetting('min_weekly_hours');
-      setMinHours(val !== null ? parseFloat(val) : 0);
+      let query = supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'min_weekly_hours');
+      if (currentTeam?.id) query = query.eq('team_id', currentTeam.id);
+      const { data } = await query.maybeSingle();
+      setMinHours(data?.value !== null && data?.value !== undefined ? parseFloat(data.value) : 0);
     } catch {
       toast.error('โหลดการตั้งค่าไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentTeam?.id]);
 
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await setSystemSetting('min_weekly_hours', String(minHours));
+      const insertData: Record<string, unknown> = { key: 'min_weekly_hours', value: String(minHours), updated_at: new Date().toISOString() };
+      if (currentTeam?.id) insertData.team_id = currentTeam.id;
+      const { error } = await supabase
+        .from('system_settings')
+        .upsert(insertData, { onConflict: 'key' });
+      if (error) throw error;
       toast.success('บันทึกการตั้งค่าสำเร็จ');
     } catch {
       toast.error('บันทึกการตั้งค่าไม่สำเร็จ');

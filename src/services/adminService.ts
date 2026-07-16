@@ -5,21 +5,25 @@ import type { Role, RoleCriteria, UserRole, WeeklyStats, RolePermission, Presenc
 // Roles
 // =============================================
 
-export async function getRoles(): Promise<Role[]> {
-  const { data, error } = await supabase
+export async function getRoles(teamId?: string): Promise<Role[]> {
+  let query = supabase
     .from('roles')
     .select('*')
     .order('sort_order', { ascending: true });
+  if (teamId) query = query.eq('team_id', teamId);
+  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as Role[]) : [];
 }
 
-export async function createRole(name: string, color: string): Promise<Role> {
+export async function createRole(name: string, color: string, teamId?: string): Promise<Role> {
   const { data: existing } = await supabase.from('roles').select('sort_order').order('sort_order', { ascending: false }).limit(1);
   const maxOrder = existing?.[0]?.sort_order ?? 0;
+  const insertData: Record<string, unknown> = { name, color, sort_order: maxOrder + 1 };
+  if (teamId) insertData.team_id = teamId;
   const { data, error } = await supabase
     .from('roles')
-    .insert({ name, color, sort_order: maxOrder + 1 })
+    .insert(insertData)
     .select()
     .maybeSingle();
   if (error) throw error;
@@ -144,12 +148,14 @@ export async function getWeeklyStats(userId: string, weekStart: string): Promise
   return data as WeeklyStats | null;
 }
 
-export async function getAllWeeklyStats(weekStart: string): Promise<WeeklyStats[]> {
-  const { data, error } = await supabase
+export async function getAllWeeklyStats(weekStart: string, teamId?: string): Promise<WeeklyStats[]> {
+  let query = supabase
     .from('weekly_stats')
     .select('*, profile:profiles(*)')
     .eq('week_start', weekStart)
     .order('total_work_seconds', { ascending: false });
+  if (teamId) query = query.eq('team_id', teamId);
+  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as WeeklyStats[]) : [];
 }
@@ -172,11 +178,13 @@ export async function getDailyStats(userId: string, date: string) {
 // All Profiles (for admin)
 // =============================================
 
-export async function getAllProfiles() {
-  const { data, error } = await supabase
+export async function getAllProfiles(teamId?: string) {
+  let query = supabase
     .from('profiles')
     .select('*')
     .order('username', { ascending: true });
+  if (teamId) query = query.eq('team_id', teamId);
+  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? data : [];
 }
@@ -258,8 +266,8 @@ export async function changeUserPassword(userId: string, newPassword: string) {
 // Presence Logs (room change history)
 // =============================================
 
-export async function getPresenceLogs(limit = 100): Promise<PresenceLog[]> {
-  const { data, error } = await supabase
+export async function getPresenceLogs(limit = 100, teamId?: string): Promise<PresenceLog[]> {
+  let query = supabase
     .from('presence_logs')
     .select(`
       *,
@@ -269,6 +277,8 @@ export async function getPresenceLogs(limit = 100): Promise<PresenceLog[]> {
     `)
     .order('changed_at', { ascending: false })
     .limit(limit);
+  if (teamId) query = query.eq('team_id', teamId);
+  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as PresenceLog[]) : [];
 }

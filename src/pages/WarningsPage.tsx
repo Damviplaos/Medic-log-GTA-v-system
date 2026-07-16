@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTeam } from '@/contexts/TeamContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -228,6 +229,8 @@ function WarningCard({
 // =============================================
 export default function WarningsPage() {
   const { profile: me } = useAuth();
+  const { currentTeam } = useTeam();
+  const teamId = currentTeam?.id;
   const isAdmin = me?.system_role === 'super_admin' || me?.system_role === 'admin';
 
   const [warnings, setWarnings] = useState<Warning[]>([]);
@@ -239,15 +242,14 @@ export default function WarningsPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const query = isAdmin
-        ? supabase.from('warnings').select('*, user:profiles!user_id(*), issuer:profiles!issued_by(*)').order('created_at', { ascending: false })
-        : supabase.from('warnings').select('*, user:profiles!user_id(*), issuer:profiles!issued_by(*)').eq('user_id', me!.id).order('created_at', { ascending: false });
-
+      let query = supabase.from('warnings').select('*, user:profiles!user_id(*), issuer:profiles!issued_by(*)').order('created_at', { ascending: false });
+      if (teamId) query = query.eq('team_id', teamId);
+      if (!isAdmin) query = query.eq('user_id', me!.id);
       const { data, error } = await query;
       if (error) throw error;
       setWarnings((data ?? []) as Warning[]);
       if (isAdmin) {
-        const p = await getAllProfiles();
+        const p = await getAllProfiles(teamId);
         setProfiles(p as Profile[]);
       }
     } catch {
@@ -255,7 +257,7 @@ export default function WarningsPage() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, me]);
+  }, [isAdmin, me, teamId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

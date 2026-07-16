@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTeam } from '@/contexts/TeamContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -343,6 +344,8 @@ function UserRolePanel({ user, allRoles, callerProfile }: { user: Profile; allRo
 // =============================================
 export default function UserManagementPage() {
   const { profile, hasPermission } = useAuth();
+  const { currentTeam } = useTeam();
+  const teamId = currentTeam?.id;
   const [users, setUsers] = useState<Profile[]>([]);
   const [allRoles, setAllRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -353,7 +356,7 @@ export default function UserManagementPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [p, r] = await Promise.all([getAllProfiles(), getRoles()]);
+      const [p, r] = await Promise.all([getAllProfiles(teamId), getRoles(teamId)]);
       setUsers(p as Profile[]);
       setAllRoles(r);
     } catch {
@@ -361,7 +364,7 @@ export default function UserManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [teamId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

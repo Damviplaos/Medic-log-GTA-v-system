@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTeam } from '@/contexts/TeamContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,19 +8,20 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { User, Lock, Shield, Settings2, Trash2, Plus } from 'lucide-react';
-import { updateProfile, changePassword } from '@/services/adminService';
+import { User, Lock, Shield, Settings2, Trash2, Plus, Users, Copy, UserCheck } from 'lucide-react';
+import { updateProfile, changePassword, deleteUserTimeLogs, getAllProfiles, getRoles, getUserRoles } from '@/services/adminService';
 import {
   getChannels, addChannel, updateChannelTrackTime, deleteChannel,
 } from '@/services/presenceService';
-import type { Channel } from '@/types/types';
+import type { Channel, Profile, Role } from '@/types/types';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
 export default function SettingsPage() {
-  const { profile, refreshProfile } = useAuth();
+  const { profile, refreshProfile, hasPermission } = useAuth();
+  const { currentTeam, createTeam, joinTeam, switchTeam, deleteTeam, teams } = useTeam();
   const [nickname, setNickname] = useState('');
   const [icName, setIcName] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
@@ -37,18 +39,31 @@ export default function SettingsPage() {
   const [channelToDelete, setChannelToDelete] = useState<Channel | null>(null);
   const [deletingChannel, setDeletingChannel] = useState(false);
 
+  // Team management
+  const [newTeamName, setNewTeamName] = useState('');
+  const [creatingTeam, setCreatingTeam] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
+  const [joiningTeam, setJoiningTeam] = useState(false);
+  const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
+
+  // Admin delete time logs
+  const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [deleteTimeLogsUser, setDeleteTimeLogsUser] = useState<Profile | null>(null);
+  const [deletingLogs, setDeletingLogs] = useState(false);
+
   const loadChannels = useCallback(async () => {
     if (!isAdmin) return;
     setLoadingChannels(true);
     try {
-      const ch = await getChannels();
+      const ch = await getChannels(currentTeam?.id);
       setChannels(ch);
     } catch {
       toast.error('โหลดห้องไม่สำเร็จ');
     } finally {
       setLoadingChannels(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, currentTeam?.id]);
 
   useEffect(() => {
     loadChannels();
@@ -68,7 +83,7 @@ export default function SettingsPage() {
     if (!newChannelName.trim()) { toast.error('กรุณากรอกชื่อห้อง'); return; }
     setCreatingChannel(true);
     try {
-      const ch = await addChannel(newChannelName.trim());
+      const ch = await addChannel(newChannelName.trim(), currentTeam?.id);
       setChannels(prev => [...prev, ch]);
       setNewChannelName('');
       toast.success(`สร้างห้อง "${ch.display_name}" สำเร็จ`);
@@ -76,6 +91,64 @@ export default function SettingsPage() {
       toast.error('สร้างห้องไม่สำเร็จ');
     } finally {
       setCreatingChannel(false);
+    }
+  };
+
+  const handleCreateTeam = async () => {
+    if (!newTeamName.trim()) { toast.error('กรุณากรอกชื่อทีม'); return; }
+    setCreatingTeam(true);
+    try {
+      await createTeam(newTeamName.trim());
+      setNewTeamName('');
+    } catch {
+      toast.error('สร้างทีมไม่สำเร็จ');
+    } finally {
+      setCreatingTeam(false);
+    }
+  };
+
+  const handleJoinTeam = async () => {
+    if (!joinCode.trim()) { toast.error('กรุณาระบุรหัสทีม'); return; }
+    setJoiningTeam(true);
+    try {
+      await joinTeam(joinCode.trim());
+      setJoinCode('');
+    } catch {
+      toast.error('เข้าร่วมทีมไม่สำเร็จ');
+    } finally {
+      setJoiningTeam(false);
+    }
+  };
+
+  const handleDeleteTeam = async () => {
+    if (!teamToDelete) return;
+    try {
+      await deleteTeam(teamToDelete);
+      setTeamToDelete(null);
+    } catch {
+      toast.error('ลบทีมไม่สำเร็จ');
+    }
+  };
+
+  // Load admin profiles for time log deletion
+  useEffect(() => {
+    if (isAdmin && hasPermission('delete_time_logs')) {
+      setLoadingProfiles(true);
+      getAllProfiles(currentTeam?.id).then(p => setAllProfiles(p as Profile[])).finally(() => setLoadingProfiles(false));
+    }
+  }, [isAdmin, hasPermission, currentTeam?.id]);
+
+  const handleDeleteTimeLogs = async () => {
+    if (!deleteTimeLogsUser) return;
+    setDeletingLogs(true);
+    try {
+      await deleteUserTimeLogs(deleteTimeLogsUser.id);
+      toast.success(`ลบข้อมูลเวลาของ "${deleteTimeLogsUser.username}" สำเร็จ`);
+      setDeleteTimeLogsUser(null);
+    } catch {
+      toast.error('ลบข้อมูลเวลาไม่สำเร็จ');
+    } finally {
+      setDeletingLogs(false);
     }
   };
 
@@ -221,7 +294,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Channel management (admin only) */}
-      {isAdmin && (
+      {isAdmin && hasPermission('manage_channels') && (
         <Card className="border-border">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -324,6 +397,164 @@ export default function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Team Management */}
+      {hasPermission('manage_teams') && (
+        <Card className="border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Users className="w-4 h-4 text-primary" /> จัดการทีม/แผนก
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Current team info */}
+            {currentTeam && (
+              <div className="flex items-center justify-between gap-3 p-3 rounded-sm bg-muted">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded bg-primary/20 flex items-center justify-center">
+                    <span className="text-xs font-bold text-primary">{currentTeam.name[0]?.toUpperCase()}</span>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{currentTeam.name}</p>
+                    <p className="text-xs text-muted-foreground">Invite Code: #{currentTeam.invite_code}</p>
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => {
+                  navigator.clipboard.writeText(currentTeam.invite_code);
+                  toast.success('คัดลอก Invite Code แล้ว');
+                }}>
+                  <Copy className="w-3 h-3 mr-1" /> คัดลอก
+                </Button>
+              </div>
+            )}
+
+            {/* Create team */}
+            <div className="flex items-center gap-2">
+              <Input
+                value={newTeamName}
+                onChange={e => setNewTeamName(e.target.value)}
+                placeholder="ชื่อทีมใหม่..."
+                className="bg-muted border-border h-8 text-sm flex-1"
+                onKeyDown={e => e.key === 'Enter' && handleCreateTeam()}
+              />
+              <Button size="sm" onClick={handleCreateTeam} disabled={creatingTeam}
+                className="h-8 bg-primary text-primary-foreground hover:opacity-90 shrink-0">
+                <Plus className="w-3.5 h-3.5 mr-1" />
+                {creatingTeam ? 'กำลังสร้าง...' : 'สร้างทีม'}
+              </Button>
+            </div>
+
+            {/* Join team */}
+            <div className="flex items-center gap-2">
+              <Input
+                value={joinCode}
+                onChange={e => setJoinCode(e.target.value)}
+                placeholder="รหัสทีม (4 หลัก)..."
+                className="bg-muted border-border h-8 text-sm flex-1"
+                onKeyDown={e => e.key === 'Enter' && handleJoinTeam()}
+              />
+              <Button size="sm" onClick={handleJoinTeam} disabled={joiningTeam}
+                variant="outline" className="h-8 text-xs shrink-0">
+                {joiningTeam ? 'กำลังเข้าร่วม...' : 'เข้าร่วมทีม'}
+              </Button>
+            </div>
+
+            {/* List all teams */}
+            {teams.length > 1 && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">ทั้งหมด {teams.length} ทีม</p>
+                {teams.map(t => (
+                  <div key={t.id} className="flex items-center justify-between gap-3 py-2 border-b border-border/50 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{t.name}</p>
+                      <p className="text-xs text-muted-foreground">#{t.invite_code}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        variant="ghost" size="icon"
+                        className="w-7 h-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setTeamToDelete(t.id)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Admin: Delete Time Logs */}
+      {isAdmin && hasPermission('delete_time_logs') && (
+        <Card className="border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Trash2 className="w-4 h-4 text-destructive" /> ลบข้อมูลเวลา (Admin)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted-foreground">เลือกสมาชิกเพื่อลบข้อมูลเวลาทำงานทั้งหมด</p>
+            {loadingProfiles ? (
+              <p className="text-xs text-muted-foreground">กำลังโหลด...</p>
+            ) : (
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {allProfiles.filter(p => p.id !== profile?.id).map(p => (
+                  <div key={p.id} className="flex items-center justify-between gap-3 py-1.5 border-b border-border/50 last:border-0">
+                    <span className="text-sm text-foreground truncate">{p.nickname || p.ic_name || p.username}</span>
+                    <Button
+                      variant="ghost" size="icon"
+                      className="w-7 h-7 text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+                      onClick={() => setDeleteTimeLogsUser(p)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Delete time logs confirm */}
+      <AlertDialog open={!!deleteTimeLogsUser} onOpenChange={open => !open && setDeleteTimeLogsUser(null)}>
+        <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>ลบข้อมูลเวลา "{deleteTimeLogsUser?.username}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              จะลบ time_logs ทั้งหมดของผู้ใช้นี้ออก และรีเซ็ต weekly_stats เป็น 0 ไม่สามารถย้อนกลับได้
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ยกเลิก</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteTimeLogs} disabled={deletingLogs}
+              className="bg-destructive text-destructive-foreground hover:opacity-90">
+              {deletingLogs ? 'กำลังลบ...' : 'ลบข้อมูลเวลา'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete team confirm */}
+      <AlertDialog open={!!teamToDelete} onOpenChange={open => !open && setTeamToDelete(null)}>
+        <AlertDialogContent className="max-w-[calc(100%-2rem)] md:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>ลบทีมนี้?</AlertDialogTitle>
+            <AlertDialogDescription>
+              การลบทีมจะลบข้อมูลทั้งหมดของทีมนี้ ไม่สามารถย้อนกลับได้
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ยกเลิก</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteTeam}
+              className="bg-destructive text-destructive-foreground hover:opacity-90">
+              ลบทีม
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete channel confirm */}
       <AlertDialog open={!!channelToDelete} onOpenChange={open => !open && setChannelToDelete(null)}>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTeam } from '@/contexts/TeamContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,12 +15,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  CheckCircle, Clock, Star, Users, RefreshCw, Search, ExternalLink, History, Banknote, Trash2,
+  CheckCircle, Clock, Star, Users, RefreshCw, Search, ExternalLink, History, Banknote, Trash2, UserCheck,
 } from 'lucide-react';
 import {
   getAllProfiles, getAllWeeklyStats, getUserRoles, getWeekStart, getRoleCriteria, getPresenceLogs, deleteUserTimeLogs,
 } from '@/services/adminService';
-import type { Profile, WeeklyStats, Role, PresenceLog, RoleCriteria } from '@/types/types';
+import type { Profile, WeeklyStats, Role, PresenceLog, RoleCriteria, PresenceWithProfile, Channel } from '@/types/types';
 import { toast } from 'sonner';
 
 function fmtTime(secs: number): string {
@@ -108,6 +109,9 @@ function PresenceLogDialog() {
 }
 
 export default function AdminDashboardPage() {
+  const { currentTeam } = useTeam();
+  const { hasPermission } = useAuth();
+  const teamId = currentTeam?.id;
   const [rows, setRows] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -120,8 +124,8 @@ export default function AdminDashboardPage() {
     setLoading(true);
     try {
       const [profiles, statsArr] = await Promise.all([
-        getAllProfiles(),
-        getAllWeeklyStats(weekStart),
+        getAllProfiles(teamId),
+        getAllWeeklyStats(weekStart, teamId),
       ]);
 
       const statsMap = Object.fromEntries((statsArr as WeeklyStats[]).map(s => [s.user_id, s]));
@@ -156,7 +160,7 @@ export default function AdminDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [weekStart]);
+  }, [weekStart, teamId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -204,7 +208,7 @@ export default function AdminDashboardPage() {
           <Button variant="outline" size="sm" onClick={loadData} className="h-8">
             <RefreshCw className="w-3.5 h-3.5 mr-1" /> รีเฟรช
           </Button>
-          <PresenceLogDialog />
+          {hasPermission('view_presence_history') && <PresenceLogDialog />}
         </div>
       </div>
 
@@ -320,13 +324,15 @@ export default function AdminDashboardPage() {
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                        <button
-                          onClick={() => setDeleteTimeLogsUser(row.profile)}
-                          className="text-destructive/70 hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10"
-                          title="ลบข้อมูลเวลา"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {hasPermission('delete_time_logs') && (
+                          <button
+                            onClick={() => setDeleteTimeLogsUser(row.profile)}
+                            className="text-destructive/70 hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10"
+                            title="ลบข้อมูลเวลา"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))

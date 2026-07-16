@@ -79,11 +79,13 @@ export async function switchChannel(channelId: string) {
 // Channels
 // =============================================
 
-export async function getChannels(): Promise<Channel[]> {
-  const { data, error } = await supabase
+export async function getChannels(teamId?: string): Promise<Channel[]> {
+  let query = supabase
     .from('channels')
     .select('*')
     .order('sort_order', { ascending: true });
+  if (teamId) query = query.eq('team_id', teamId);
+  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as Channel[]) : [];
 }
@@ -96,7 +98,7 @@ export async function updateChannelTrackTime(channelId: string, trackTime: boole
   if (error) throw error;
 }
 
-export async function addChannel(displayName: string): Promise<Channel> {
+export async function addChannel(displayName: string, teamId?: string): Promise<Channel> {
   const { data: existing } = await supabase
     .from('channels')
     .select('sort_order')
@@ -104,9 +106,11 @@ export async function addChannel(displayName: string): Promise<Channel> {
     .limit(1);
   const maxOrder = existing?.[0]?.sort_order ?? 0;
   const slug = displayName.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-ก-๙]/g, '') || `ch-${Date.now()}`;
+  const insertData: Record<string, unknown> = { name: slug, display_name: displayName.trim(), sort_order: maxOrder + 1, track_time: true };
+  if (teamId) insertData.team_id = teamId;
   const { data, error } = await supabase
     .from('channels')
-    .insert({ name: slug, display_name: displayName.trim(), sort_order: maxOrder + 1, track_time: true })
+    .insert(insertData)
     .select()
     .maybeSingle();
   if (error) throw error;
@@ -168,8 +172,8 @@ export async function deleteChannel(channelId: string) {
 // Presence List (all online users)
 // =============================================
 
-export async function getAllPresence(): Promise<PresenceWithProfile[]> {
-  const { data, error } = await supabase
+export async function getAllPresence(teamId?: string): Promise<PresenceWithProfile[]> {
+  let query = supabase
     .from('user_presence')
     .select(`
       *,
@@ -177,6 +181,8 @@ export async function getAllPresence(): Promise<PresenceWithProfile[]> {
       channel:channels!user_presence_channel_id_fkey(*)
     `)
     .order('joined_channel_at', { ascending: true });
+  if (teamId) query = query.eq('team_id', teamId);
+  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as PresenceWithProfile[]) : [];
 }
@@ -185,12 +191,13 @@ export async function getAllPresence(): Promise<PresenceWithProfile[]> {
 // Queue Pointer
 // =============================================
 
-export async function getQueuePointer(): Promise<QueuePointer | null> {
-  const { data, error } = await supabase
+export async function getQueuePointer(teamId?: string): Promise<QueuePointer | null> {
+  let query = supabase
     .from('queue_pointer')
     .select('*')
-    .eq('id', '00000000-0000-0000-0000-000000000001')
-    .maybeSingle();
+    .eq('id', '00000000-0000-0000-0000-000000000001');
+  if (teamId) query = query.eq('team_id', teamId);
+  const { data, error } = await query.maybeSingle();
   if (error) throw error;
   return data as QueuePointer | null;
 }

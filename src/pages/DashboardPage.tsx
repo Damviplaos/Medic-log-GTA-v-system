@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTeam } from '@/contexts/TeamContext';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,35 @@ function fmtTime(secs: number): string {
 
 function fmtBaht(amount: number): string {
   return amount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtBahtText(amount: number): string {
+  const rounded = Math.round(amount);
+  if (rounded === 0) return 'ศูนย์บาท';
+  const thaiDigits = ['ศูนย์', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'];
+  const thaiUnits = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน', 'ล้าน'];
+  
+  function convertGroup(n: number): string {
+    if (n === 0) return '';
+    let result = '';
+    const digits = String(n).split('').reverse();
+    for (let i = digits.length - 1; i >= 0; i--) {
+      const d = parseInt(digits[i]);
+      if (d === 0) continue;
+      if (d === 1 && i === 1) result += 'สิบ';
+      else if (d === 2 && i === 1) result += 'ยี่สิบ';
+      else if (d === 1 && i === 0) result += 'เอ็ด';
+      else result += thaiDigits[d] + thaiUnits[i];
+    }
+    return result;
+  }
+  
+  if (rounded >= 1000000) {
+    const millions = Math.floor(rounded / 1000000);
+    const remainder = rounded % 1000000;
+    return convertGroup(millions) + 'ล้าน' + convertGroup(remainder) + 'บาท';
+  }
+  return convertGroup(rounded) + 'บาท';
 }
 
 function getWeekDates(weekStart: string): string[] {
@@ -327,6 +357,9 @@ export default function DashboardPage() {
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-muted-foreground">รายได้ประมาณการ (สัปดาห์นี้)</p>
                 <p className="text-xl font-bold text-primary">{fmtBaht(estimatedSalary)} ฿</p>
+                <p className="text-[11px] text-muted-foreground">
+                  ({fmtBahtText(estimatedSalary)})
+                </p>
                 <p className="text-[11px] text-muted-foreground">
                   {fmtTime(weeklyStats?.total_work_seconds ?? 0)} × {fmtBaht(criteria!.hourly_salary!)} บาท/ชม.
                 </p>

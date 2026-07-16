@@ -22,6 +22,7 @@ import {
 import { getChannels, addChannel, updateChannelTrackTime, deleteChannel } from '@/services/presenceService';
 import type { Role, RoleCriteria, Channel, RolePermission } from '@/types/types';
 import { PERMISSION_CATEGORIES } from '@/types/types';
+import { useTeam } from '@/contexts/TeamContext';
 
 // =============================================
 // Role Criteria Editor
@@ -393,6 +394,8 @@ function RoleCard({ role, index, total, allRoles, onDelete, onMove, onUpdate }: 
 // Main Role Management Page
 // =============================================
 export default function RoleManagementPage() {
+  const { currentTeam } = useTeam();
+  const teamId = currentTeam?.id;
   const [roles, setRoles] = useState<Role[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -407,12 +410,12 @@ export default function RoleManagementPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [r, ch] = await Promise.all([getRoles(), getChannels()]);
+      const [r, ch] = await Promise.all([getRoles(teamId), getChannels(teamId)]);
       setRoles(r);
       setChannels(ch);
     } catch { toast.error('โหลดข้อมูลไม่สำเร็จ'); }
     finally { setLoading(false); }
-  }, []);
+  }, [teamId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -420,7 +423,7 @@ export default function RoleManagementPage() {
     if (!newRoleName.trim()) { toast.error('กรุณากรอกชื่อยศ'); return; }
     setCreating(true);
     try {
-      const r = await createRole(newRoleName.trim(), newRoleColor);
+      const r = await createRole(newRoleName.trim(), newRoleColor, teamId);
       setRoles(prev => [...prev, r]);
       setNewRoleName(''); setNewRoleColor('#22c55e');
       toast.success('สร้างยศสำเร็จ');
@@ -475,7 +478,7 @@ export default function RoleManagementPage() {
     if (!newChannelName.trim()) { toast.error('กรุณากรอกชื่อห้อง'); return; }
     setCreatingChannel(true);
     try {
-      const ch = await addChannel(newChannelName.trim());
+      const ch = await addChannel(newChannelName.trim(), teamId);
       setChannels(prev => [...prev, ch]);
       setNewChannelName('');
       toast.success(`สร้างห้อง "${ch.display_name}" สำเร็จ`);

@@ -15,10 +15,13 @@ import {
   getLastChannelId,
 } from '@/services/presenceService';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTeam } from '@/contexts/TeamContext';
 import { toast } from 'sonner';
 
 export function useQueue() {
   const { user, profile } = useAuth();
+  const { currentTeam } = useTeam();
+  const teamId = currentTeam?.id;
   const [presenceList, setPresenceList] = useState<PresenceWithProfile[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [pointer, setPointer] = useState<QueuePointer | null>(null);
@@ -28,14 +31,14 @@ export function useQueue() {
 
   const fetchAll = useCallback(async () => {
     const [pList, chList, ptr] = await Promise.all([
-      getAllPresence(),
-      getChannels(),
-      getQueuePointer(),
+      getAllPresence(teamId),
+      getChannels(teamId),
+      getQueuePointer(teamId),
     ]);
     setPresenceList(pList);
     setChannels(chList);
     setPointer(ptr);
-  }, []);
+  }, [teamId]);
 
   // Auto-join on mount (restore last channel after refresh/F5)
   useEffect(() => {
