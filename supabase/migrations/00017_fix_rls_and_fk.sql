@@ -1,5 +1,5 @@
 -- =============================================
--- Fix RLS + add missing FK constraints
+-- Fix RLS + FK constraints
 -- =============================================
 
 -- Allow any authenticated user to create teams (edge function uses service_role anyway, this is fallback)
@@ -11,3 +11,6 @@ CREATE POLICY teams_insert_authenticated ON public.teams
 ALTER TABLE public.time_logs DROP CONSTRAINT IF EXISTS time_logs_channel_id_fkey;
 ALTER TABLE public.time_logs ADD CONSTRAINT time_logs_channel_id_fkey
   FOREIGN KEY (channel_id) REFERENCES public.channels(id) ON DELETE SET NULL;
+
+-- Drop NOT NULL on time_logs.channel_id so SET NULL actually works
+ALTER TABLE public.time_logs ALTER COLUMN channel_id DROP NOT NULL;

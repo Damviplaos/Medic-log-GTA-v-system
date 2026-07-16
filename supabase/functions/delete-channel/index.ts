@@ -65,24 +65,23 @@ Deno.serve(async (req: Request) => {
 
     const fallbackChannelId = otherChannels?.[0]?.id ?? null;
 
-    // Nullify presence_logs references
+    // 1. Nullify presence_logs references
     await supabaseAdmin
       .from('presence_logs')
       .update({ from_channel_id: null })
       .eq('from_channel_id', channel_id);
-
     await supabaseAdmin
       .from('presence_logs')
       .update({ to_channel_id: null })
       .eq('to_channel_id', channel_id);
 
-    // Nullify time_logs references
+    // 2. Delete time_logs for this channel (channel_id is NOT NULL, can't set null)
     await supabaseAdmin
       .from('time_logs')
-      .update({ channel_id: null })
+      .delete()
       .eq('channel_id', channel_id);
 
-    // Move all users currently in this channel to fallback (if exists)
+    // 3. Move users to fallback, or remove them
     if (fallbackChannelId) {
       await supabaseAdmin
         .from('user_presence')
@@ -95,7 +94,7 @@ Deno.serve(async (req: Request) => {
         .eq('channel_id', channel_id);
     }
 
-    // Delete the channel
+    // 4. Delete the channel (ON DELETE CASCADE handles remaining user_presence)
     const { error: deleteError } = await supabaseAdmin
       .from('channels')
       .delete()

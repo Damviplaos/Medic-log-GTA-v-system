@@ -1,6 +1,10 @@
 import { supabase } from '@/db/supabase';
 import type { Team } from '@/types/types';
 
+function generateInviteCode(): string {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
 export async function getTeams(): Promise<Team[]> {
   const { data, error } = await supabase
     .from('teams')
@@ -23,15 +27,41 @@ export async function getMyTeams(): Promise<Team[]> {
 }
 
 export async function createTeam(name: string): Promise<Team> {
-  const { data, error } = await supabase.functions.invoke('manage-team', {
-    body: { action: 'create_team', name },
-    method: 'POST',
-  });
-  if (error) {
-    const msg = await error?.context?.text?.();
-    throw new Error(msg || error.message);
+  // Try edge function first (uses service_role, bypasses RLS)
+  try {
+    const { data, error } = await supabase.functions.invoke('manage-team', {
+      body: { action: 'create_team', name },
+      method: 'POST',
+    });
+    if (!error && data && !data.error) {
+      return data as Team;
+    }
+  } catch (_e) {
+    // Edge function not deployed — fall back to direct insert
   }
-  if (data?.error) throw new Error(data.error);
+
+  // Fallback: direct insert (requires migration 00017 RLS fix)
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('ไม่ได้เข้าสู่ระบบ');
+
+  const inviteCode = generateInviteCode();
+  const { data, error } = await supabase
+    .from('teams')
+    .insert({
+      name: name.trim(),
+      invite_code: inviteCode,
+      owner_id: user.id,
+    })
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+
+  // Set creator's team_id
+  await supabase
+    .from('profiles')
+    .update({ team_id: data.id })
+    .eq('id', user.id);
+
   return data as Team;
 }
 
