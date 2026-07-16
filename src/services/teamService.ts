@@ -1,10 +1,6 @@
 import { supabase } from '@/db/supabase';
 import type { Team } from '@/types/types';
 
-function generateInviteCode(): string {
-  return String(Math.floor(1000 + Math.random() * 9000));
-}
-
 export async function getTeams(): Promise<Team[]> {
   const { data, error } = await supabase
     .from('teams')
@@ -27,27 +23,15 @@ export async function getMyTeams(): Promise<Team[]> {
 }
 
 export async function createTeam(name: string): Promise<Team> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('ไม่ได้เข้าสู่ระบบ');
-
-  const inviteCode = generateInviteCode();
-  const { data, error } = await supabase
-    .from('teams')
-    .insert({
-      name: name.trim(),
-      invite_code: inviteCode,
-      owner_id: user.id,
-    })
-    .select()
-    .maybeSingle();
-  if (error) throw error;
-
-  // Set creator as team owner profile
-  await supabase
-    .from('profiles')
-    .update({ team_id: data.id, system_role: 'super_admin' })
-    .eq('id', user.id);
-
+  const { data, error } = await supabase.functions.invoke('manage-team', {
+    body: { action: 'create_team', name },
+    method: 'POST',
+  });
+  if (error) {
+    const msg = await error?.context?.text?.();
+    throw new Error(msg || error.message);
+  }
+  if (data?.error) throw new Error(data.error);
   return data as Team;
 }
 
@@ -62,7 +46,6 @@ export async function joinTeam(inviteCode: string): Promise<Team> {
     .maybeSingle();
   if (findError || !team) throw new Error('รหัสทีมไม่ถูกต้อง');
 
-  // Update profile with team_id
   const { error } = await supabase
     .from('profiles')
     .update({ team_id: team.id })
@@ -97,7 +80,6 @@ export async function deleteTeam(teamId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('ไม่ได้เข้าสู่ระบบ');
 
-  // Check ownership or super_admin
   const { data: team } = await supabase.from('teams').select('owner_id').eq('id', teamId).maybeSingle();
   const { data: profile } = await supabase.from('profiles').select('system_role').eq('id', user.id).maybeSingle();
 

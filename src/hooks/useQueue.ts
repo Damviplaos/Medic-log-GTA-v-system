@@ -18,6 +18,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTeam } from '@/contexts/TeamContext';
 import { toast } from 'sonner';
 
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 export function useQueue() {
   const { user, profile } = useAuth();
   const { currentTeam } = useTeam();
@@ -28,19 +35,24 @@ export function useQueue() {
   const [loading, setLoading] = useState(true);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const joinedRef = useRef(false);
+  const prevTeamRef = useRef<string | undefined>(undefined);
 
   const fetchAll = useCallback(async () => {
-    const [pList, chList, ptr] = await Promise.all([
-      getAllPresence(teamId),
-      getChannels(teamId),
-      getQueuePointer(teamId),
-    ]);
-    setPresenceList(pList);
-    setChannels(chList);
-    setPointer(ptr);
+    try {
+      const [pList, chList, ptr] = await Promise.all([
+        withTimeout(getAllPresence(teamId), 10000, []),
+        withTimeout(getChannels(teamId), 10000, []),
+        withTimeout(getQueuePointer(teamId), 10000, null),
+      ]);
+      setPresenceList(pList);
+      setChannels(chList);
+      setPointer(ptr);
+    } catch (err) {
+      console.error('fetchAll error:', err);
+    }
   }, [teamId]);
 
-  // Auto-join on mount (restore last channel after refresh/F5)
+  // Auto-join on mount and re-join when team changes
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -48,9 +60,15 @@ export function useQueue() {
     const init = async () => {
       setLoading(true);
       try {
+        // Re-join if team changed
+        if (prevTeamRef.current !== teamId) {
+          joinedRef.current = false;
+          prevTeamRef.current = teamId;
+        }
+
         if (!joinedRef.current) {
           const lastChannelId = getLastChannelId();
-          await joinPresence(lastChannelId ?? undefined);
+          await withTimeout(joinPresence(lastChannelId ?? undefined), 10000, null);
           joinedRef.current = true;
         }
         if (!cancelled) await fetchAll();
@@ -69,7 +87,7 @@ export function useQueue() {
       cancelled = true;
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
     };
-  }, [user, fetchAll]);
+  }, [user, fetchAll, teamId]);
 
   // Leave on window unload
   useEffect(() => {
@@ -90,7 +108,7 @@ export function useQueue() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetchAll]);
+  }, [fetchAll, teamId]);
 
   const myPresence = presenceList.find(p => p.user_id === user?.id);
   const myChannel = channels.find(c => c.id === myPresence?.channel_id);
@@ -99,7 +117,6 @@ export function useQueue() {
   const handleSwitchChannel = useCallback(async (channelId: string) => {
     try {
       await switchChannel(channelId);
-      // Realtime will update list
     } catch (err) {
       toast.error('ย้ายห้องไม่สำเร็จ');
       console.error(err);

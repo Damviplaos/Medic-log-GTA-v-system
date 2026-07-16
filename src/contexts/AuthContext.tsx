@@ -5,17 +5,20 @@ import type { Profile } from '@/types/types';
 import { toast } from 'sonner';
 
 export async function getProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error('โหลดโปรไฟล์ไม่สำเร็จ:', error);
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) {
+      console.error('โหลดโปรไฟล์ไม่สำเร็จ:', error);
+      return null;
+    }
+    return data as Profile | null;
+  } catch {
     return null;
   }
-  return data as Profile | null;
 }
 
 async function loadPermissions(userId: string): Promise<string[]> {
@@ -25,6 +28,13 @@ async function loadPermissions(userId: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
 }
 
 interface AuthContextType {
@@ -47,12 +57,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const loadUserData = useCallback(async (userId: string) => {
-    const [profileData, perms] = await Promise.all([
-      getProfile(userId),
-      loadPermissions(userId),
-    ]);
-    setProfile(profileData);
-    setPermissions(perms);
+    try {
+      const [profileData, perms] = await Promise.all([
+        withTimeout(getProfile(userId), 8000, null),
+        withTimeout(loadPermissions(userId), 8000, []),
+      ]);
+      setProfile(profileData);
+      setPermissions(perms);
+    } catch (err) {
+      console.error('loadUserData error:', err);
+      setProfile(null);
+      setPermissions([]);
+    }
   }, []);
 
   const refreshProfile = async () => {
@@ -61,17 +77,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    let cancelled = false;
+
     supabase.auth.getSession()
       .then(async ({ data: { session } }) => {
+        if (cancelled) return;
         setUser(session?.user ?? null);
         if (session?.user) {
           await loadUserData(session.user.id);
         }
       })
-      .catch(error => toast.error(`โหลดเซสชันไม่สำเร็จ: ${error.message}`))
-      .finally(() => setLoading(false));
+      .catch(error => {
+        console.error('Session error:', error);
+        toast.error(`โหลดเซสชันไม่สำเร็จ: ${error.message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (cancelled) return;
       setUser(session?.user ?? null);
       if (session?.user) {
         await loadUserData(session.user.id);
@@ -81,11 +106,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, [loadUserData]);
 
   const hasPermission = useCallback((key: string): boolean => {
-    // super_admin and admin always have all permissions
     if (profile?.system_role === 'super_admin' || profile?.system_role === 'admin') return true;
     return permissions.includes(key);
   }, [profile, permissions]);

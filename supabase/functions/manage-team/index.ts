@@ -1,62 +1,67 @@
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
+import { corsHeaders } from '../_shared/cors.ts';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Get authenticated user
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing authorization' }), {
+      return new Response(JSON.stringify({ error: 'ไม่ได้รับอนุญาต' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({ error: 'ไม่ได้รับอนุญาต' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const { action, team_id, target_user_id, channel_id } = await req.json();
+    const body = await req.json();
+    const { action, team_id, target_user_id, channel_id } = body;
 
-    // Get caller's profile for permission check
-    const { data: callerProfile } = await supabase
+    const { data: callerProfile } = await supabaseAdmin
       .from('profiles')
       .select('system_role, team_id')
       .eq('id', user.id)
       .maybeSingle();
 
     if (!callerProfile) {
-      return new Response(JSON.stringify({ error: 'Profile not found' }), {
+      return new Response(JSON.stringify({ error: 'ไม่พบโปรไฟล์' }), {
         status: 404,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     if (action === 'create_team') {
-      // Anyone authenticated can create a team
-      const { name } = await req.json();
+      const { name } = body;
+      if (!name || !name.trim()) {
+        return new Response(JSON.stringify({ error: 'ต้องระบุชื่อทีม' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       const inviteCode = String(Math.floor(1000 + Math.random() * 9000));
 
-      const { data: team, error } = await supabase
+      const { data: team, error } = await supabaseAdmin
         .from('teams')
         .insert({
           name: name.trim(),
@@ -68,8 +73,7 @@ serve(async (req: Request) => {
 
       if (error) throw error;
 
-      // Set team_id on creator's profile
-      await supabase
+      await supabaseAdmin
         .from('profiles')
         .update({ team_id: team.id })
         .eq('id', user.id);
@@ -88,21 +92,7 @@ serve(async (req: Request) => {
         });
       }
 
-      // Verify user belongs to this team
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('team_id')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (profile?.team_id !== team_id && callerProfile.system_role !== 'super_admin') {
-        return new Response(JSON.stringify({ error: 'Not a member of this team' }), {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('profiles')
         .update({ team_id })
         .eq('id', user.id);
@@ -115,9 +105,8 @@ serve(async (req: Request) => {
     }
 
     if (action === 'admin_move_user') {
-      // Admin: move another user to a channel
-      if (callerProfile.system_role !== 'super_admin' && callerProfile.system_role !== 'admin') {
-        return new Response(JSON.stringify({ error: 'Insufficient permissions' }), {
+      if (!['super_admin', 'admin'].includes(callerProfile.system_role)) {
+        return new Response(JSON.stringify({ error: 'ต้องการสิทธิ์แอดมิน' }), {
           status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -130,8 +119,7 @@ serve(async (req: Request) => {
         });
       }
 
-      // Get current presence
-      const { data: currentPresence } = await supabase
+      const { data: currentPresence } = await supabaseAdmin
         .from('user_presence')
         .select('channel_id')
         .eq('user_id', target_user_id)
@@ -139,7 +127,6 @@ serve(async (req: Request) => {
 
       const fromChannelId = currentPresence?.channel_id ?? null;
 
-      // Update or insert presence
       const upsertData: Record<string, unknown> = {
         user_id: target_user_id,
         channel_id,
@@ -148,13 +135,11 @@ serve(async (req: Request) => {
       };
       if (callerProfile.team_id) upsertData.team_id = callerProfile.team_id;
 
-      const { error: upsertError } = await supabase
+      const { error: upsertError } = await supabaseAdmin
         .from('user_presence')
         .upsert(upsertData, { onConflict: 'user_id' });
-
       if (upsertError) throw upsertError;
 
-      // Log the move
       const logData: Record<string, unknown> = {
         user_id: target_user_id,
         from_channel_id: fromChannelId,
@@ -162,7 +147,7 @@ serve(async (req: Request) => {
         changed_at: new Date().toISOString(),
       };
       if (callerProfile.team_id) logData.team_id = callerProfile.team_id;
-      await supabase.from('presence_logs').insert(logData);
+      await supabaseAdmin.from('presence_logs').insert(logData);
 
       return new Response(JSON.stringify({ success: true }), {
         status: 200,
@@ -170,13 +155,13 @@ serve(async (req: Request) => {
       });
     }
 
-    return new Response(JSON.stringify({ error: 'Unknown action' }), {
+    return new Response(JSON.stringify({ error: 'ไม่รู้จัก action' }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
-  } catch (error) {
-    return new Response(JSON.stringify({ error: (error as Error).message }), {
+  } catch (err) {
+    return new Response(JSON.stringify({ error: String(err) }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

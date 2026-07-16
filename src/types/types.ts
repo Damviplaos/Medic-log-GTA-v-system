@@ -31,6 +31,7 @@ export interface Channel {
   display_name: string;
   sort_order: number;
   track_time: boolean;
+  team_id: string | null;
   created_at: string;
 }
 
@@ -43,6 +44,7 @@ export interface UserPresence {
   queue_position: number | null;
   session_started_at: string;
   last_heartbeat: string;
+  team_id: string | null;
   created_at: string;
   // joined from profiles
   profile?: Profile;
@@ -53,6 +55,7 @@ export interface UserPresence {
 export interface QueuePointer {
   id: string;
   pointed_user_id: string | null;
+  team_id: string | null;
   updated_at: string;
 }
 
@@ -74,6 +77,7 @@ export interface Role {
   name: string;
   color: string;
   sort_order: number;
+  team_id: string | null;
   created_at: string;
 }
 

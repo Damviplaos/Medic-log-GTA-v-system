@@ -6,12 +6,18 @@ import type { Role, RoleCriteria, UserRole, WeeklyStats, RolePermission, Presenc
 // =============================================
 
 export async function getRoles(teamId?: string): Promise<Role[]> {
-  let query = supabase
+  if (teamId) {
+    const { data, error } = await supabase
+      .from('roles')
+      .select('*')
+      .eq('team_id', teamId)
+      .order('sort_order', { ascending: true });
+    if (!error && Array.isArray(data) && data.length > 0) return data as Role[];
+  }
+  const { data, error } = await supabase
     .from('roles')
     .select('*')
     .order('sort_order', { ascending: true });
-  if (teamId) query = query.eq('team_id', teamId);
-  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as Role[]) : [];
 }
@@ -149,13 +155,20 @@ export async function getWeeklyStats(userId: string, weekStart: string): Promise
 }
 
 export async function getAllWeeklyStats(weekStart: string, teamId?: string): Promise<WeeklyStats[]> {
-  let query = supabase
+  if (teamId) {
+    const { data, error } = await supabase
+      .from('weekly_stats')
+      .select('*, profile:profiles(*)')
+      .eq('week_start', weekStart)
+      .eq('team_id', teamId)
+      .order('total_work_seconds', { ascending: false });
+    if (!error && Array.isArray(data) && data.length > 0) return data as WeeklyStats[];
+  }
+  const { data, error } = await supabase
     .from('weekly_stats')
     .select('*, profile:profiles(*)')
     .eq('week_start', weekStart)
     .order('total_work_seconds', { ascending: false });
-  if (teamId) query = query.eq('team_id', teamId);
-  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as WeeklyStats[]) : [];
 }
@@ -179,12 +192,18 @@ export async function getDailyStats(userId: string, date: string) {
 // =============================================
 
 export async function getAllProfiles(teamId?: string) {
-  let query = supabase
+  if (teamId) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('team_id', teamId)
+      .order('username', { ascending: true });
+    if (!error && Array.isArray(data) && data.length > 0) return data;
+  }
+  const { data, error } = await supabase
     .from('profiles')
     .select('*')
     .order('username', { ascending: true });
-  if (teamId) query = query.eq('team_id', teamId);
-  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? data : [];
 }
@@ -267,7 +286,21 @@ export async function changeUserPassword(userId: string, newPassword: string) {
 // =============================================
 
 export async function getPresenceLogs(limit = 100, teamId?: string): Promise<PresenceLog[]> {
-  let query = supabase
+  if (teamId) {
+    const { data, error } = await supabase
+      .from('presence_logs')
+      .select(`
+        *,
+        profile:profiles!presence_logs_user_id_fkey(*),
+        from_channel:channels!presence_logs_from_channel_id_fkey(*),
+        to_channel:channels!presence_logs_to_channel_id_fkey(*)
+      `)
+      .eq('team_id', teamId)
+      .order('changed_at', { ascending: false })
+      .limit(limit);
+    if (!error && Array.isArray(data) && data.length > 0) return data as PresenceLog[];
+  }
+  const { data, error } = await supabase
     .from('presence_logs')
     .select(`
       *,
@@ -277,8 +310,6 @@ export async function getPresenceLogs(limit = 100, teamId?: string): Promise<Pre
     `)
     .order('changed_at', { ascending: false })
     .limit(limit);
-  if (teamId) query = query.eq('team_id', teamId);
-  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as PresenceLog[]) : [];
 }

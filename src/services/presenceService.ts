@@ -76,16 +76,22 @@ export async function switchChannel(channelId: string) {
 }
 
 // =============================================
-// Channels
+// Channels — fallback to all if team filter returns empty
 // =============================================
 
 export async function getChannels(teamId?: string): Promise<Channel[]> {
-  let query = supabase
+  if (teamId) {
+    const { data, error } = await supabase
+      .from('channels')
+      .select('*')
+      .eq('team_id', teamId)
+      .order('sort_order', { ascending: true });
+    if (!error && Array.isArray(data) && data.length > 0) return data as Channel[];
+  }
+  const { data, error } = await supabase
     .from('channels')
     .select('*')
     .order('sort_order', { ascending: true });
-  if (teamId) query = query.eq('team_id', teamId);
-  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as Channel[]) : [];
 }
@@ -118,7 +124,6 @@ export async function addChannel(displayName: string, teamId?: string): Promise<
 }
 
 export async function deleteChannel(channelId: string) {
-  // Try edge function first (uses service_role to bypass RLS)
   try {
     const { data, error } = await supabase.functions.invoke('delete-channel', {
       body: { channel_id: channelId },
@@ -131,11 +136,9 @@ export async function deleteChannel(channelId: string) {
     if (data?.error) throw new Error(data.error);
     return;
   } catch (_edgeFnError) {
-    // Edge function failed — fall back to direct Supabase delete with admin RLS
+    // Edge function failed — fall back to direct Supabase delete
   }
 
-  // Fallback: direct delete via client (admin user via RLS policy)
-  // 1. Find fallback channel to migrate users
   const { data: otherChannels } = await supabase
     .from('channels')
     .select('id')
@@ -145,7 +148,6 @@ export async function deleteChannel(channelId: string) {
 
   const fallbackChannelId = otherChannels?.[0]?.id ?? null;
 
-  // 2. Migrate or remove users in this channel
   if (fallbackChannelId) {
     await supabase
       .from('user_presence')
@@ -155,11 +157,10 @@ export async function deleteChannel(channelId: string) {
     await supabase.from('user_presence').delete().eq('channel_id', channelId);
   }
 
-  // 3. Nullify presence_logs references
   await supabase.from('presence_logs').update({ from_channel_id: null }).eq('from_channel_id', channelId);
   await supabase.from('presence_logs').update({ to_channel_id: null }).eq('to_channel_id', channelId);
+  await supabase.from('time_logs').update({ channel_id: null }).eq('channel_id', channelId);
 
-  // 4. Delete the channel
   const { error: deleteError } = await supabase
     .from('channels')
     .delete()
@@ -169,11 +170,23 @@ export async function deleteChannel(channelId: string) {
 }
 
 // =============================================
-// Presence List (all online users)
+// Presence List — fallback to all if team filter returns empty
 // =============================================
 
 export async function getAllPresence(teamId?: string): Promise<PresenceWithProfile[]> {
-  let query = supabase
+  if (teamId) {
+    const { data, error } = await supabase
+      .from('user_presence')
+      .select(`
+        *,
+        profile:profiles!user_presence_user_id_fkey(*),
+        channel:channels!user_presence_channel_id_fkey(*)
+      `)
+      .eq('team_id', teamId)
+      .order('joined_channel_at', { ascending: true });
+    if (!error && Array.isArray(data) && data.length > 0) return data as PresenceWithProfile[];
+  }
+  const { data, error } = await supabase
     .from('user_presence')
     .select(`
       *,
@@ -181,29 +194,34 @@ export async function getAllPresence(teamId?: string): Promise<PresenceWithProfi
       channel:channels!user_presence_channel_id_fkey(*)
     `)
     .order('joined_channel_at', { ascending: true });
-  if (teamId) query = query.eq('team_id', teamId);
-  const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) ? (data as PresenceWithProfile[]) : [];
 }
 
 // =============================================
-// Queue Pointer
+// Queue Pointer — fallback to default if team filter returns null
 // =============================================
 
 export async function getQueuePointer(teamId?: string): Promise<QueuePointer | null> {
-  let query = supabase
+  if (teamId) {
+    const { data, error } = await supabase
+      .from('queue_pointer')
+      .select('*')
+      .eq('id', '00000000-0000-0000-0000-000000000001')
+      .eq('team_id', teamId)
+      .maybeSingle();
+    if (!error && data) return data as QueuePointer;
+  }
+  const { data, error } = await supabase
     .from('queue_pointer')
     .select('*')
-    .eq('id', '00000000-0000-0000-0000-000000000001');
-  if (teamId) query = query.eq('team_id', teamId);
-  const { data, error } = await query.maybeSingle();
+    .eq('id', '00000000-0000-0000-0000-000000000001')
+    .maybeSingle();
   if (error) throw error;
   return data as QueuePointer | null;
 }
 
 export async function advanceQueuePointer(currentPointedUserId: string | null, readyChannelId: string) {
-  // Get all users in ready channel ordered by join time
   const { data: queue } = await supabase
     .from('user_presence')
     .select('user_id, joined_channel_at')
@@ -219,7 +237,6 @@ export async function advanceQueuePointer(currentPointedUserId: string | null, r
   }
 
   if (!currentPointedUserId) {
-    // Point to first
     await supabase
       .from('queue_pointer')
       .update({ pointed_user_id: queue[0].user_id, updated_at: new Date().toISOString() })
