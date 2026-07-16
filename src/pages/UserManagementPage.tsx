@@ -400,6 +400,8 @@ export default function UserManagementPage() {
   // A target user can be managed if caller has enough privilege
   const canManage = (target: Profile) => {
     if (!profile) return false;
+    // Super admin can only edit themselves — no one else can edit super_admin
+    if (target.system_role === 'super_admin') return target.id === profile.id;
     if (profile.system_role === 'super_admin') return true;
     if (profile.system_role === 'admin' && target.system_role === 'user') return true;
     return false;

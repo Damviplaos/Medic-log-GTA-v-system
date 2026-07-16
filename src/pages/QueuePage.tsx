@@ -116,7 +116,8 @@ function UserRow({
   onMoveUser, onToggleOPUser, onAdminPair, isAdmin, canPairOthers,
 }: UserRowProps) {
   const displayName = presence.profile?.nickname || presence.profile?.ic_name || presence.profile?.username || '?';
-  const isPaired = myPairUserId !== null;
+  // Check pairing from DB-backed paired_with_user_id
+  const isPaired = (presence as PresenceWithProfile & { paired_with_user_id?: string | null }).paired_with_user_id != null;
 
   // Highlight pair partner row
   const isMyPartner = !isMe && presence.user_id === myPairUserId;
@@ -466,12 +467,15 @@ export default function QueuePage() {
   const {
     presenceList, presenceByChannel, channels, pointer, myPresence,
     opList, loading, handleSwitchChannel, handleToggleOP,
-    handleNextPointer, handleRandomOP, fetchAll,
+    handleNextPointer, handleRandomOP, fetchAll, handlePair, handleCancelPair,
   } = useQueue();
 
-  // ── Pairing state ──────────────────────────────────────────────
-  const [myPairUserId, setMyPairUserId] = useState<string | null>(null);
+  // ── Pairing state (DB-backed via paired_with column) ──────────────
   const [pairingPickerOpen, setPairingPickerOpen] = useState(false);
+  const [adminPairTarget, setAdminPairTarget] = useState<string | null>(null);
+  const [adminPairPartnerPickerOpen, setAdminPairPartnerPickerOpen] = useState(false);
+
+  const myPairUserId = myPresence?.paired_with_user_id ?? null;
 
   // Track my current channel to detect room moves
   const myChannelIdRef = useRef<string | null>(null);
@@ -480,55 +484,44 @@ export default function QueuePage() {
   useEffect(() => {
     if (!myPresence) return;
     const prev = prevMyPresence.current;
-    // If I moved rooms, cancel pair
-    if (prev && prev.channel_id !== myPresence.channel_id && myPairUserId !== null) {
-      setMyPairUserId(null);
-      toast.info('การจับคู่ถูกยกเลิกเนื่องจากคุณย้ายห้อง');
-    }
     prevMyPresence.current = myPresence;
     myChannelIdRef.current = myPresence.channel_id;
-  }, [myPresence, myPairUserId]);
+  }, [myPresence]);
 
-  // Watch partner channel changes → cancel if partner moved
-  const partnerRef = useRef<string | null>(null);
-  partnerRef.current = myPairUserId;
-
+  // Watch partner — cancel if partner went offline or moved rooms
   useEffect(() => {
     if (!myPairUserId) return;
     const partner = presenceList.find(p => p.user_id === myPairUserId);
     if (!partner) {
-      // Partner went offline
-      setMyPairUserId(null);
+      handleCancelPair();
       toast.info('คู่ของคุณออกจากระบบ — การจับคู่ถูกยกเลิก');
       return;
     }
-    // Partner changed channel from mine
     if (myPresence && partner.channel_id !== myPresence.channel_id) {
-      // Only cancel if they were previously in the same channel
-      setMyPairUserId(null);
+      handleCancelPair();
       toast.info(`${partner.profile?.nickname || partner.profile?.username || 'คู่ของคุณ'} ย้ายห้อง — การจับคู่ถูกยกเลิก`);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presenceList]);
+  }, [presenceList, myPairUserId]);
 
-  const handleSelectPair = (presence: PresenceWithProfile) => {
-    setMyPairUserId(presence.user_id);
-    const name = presence.profile?.nickname || presence.profile?.username || '?';
-    toast.success(`จับคู่กับ "${name}" สำเร็จ`);
+  const handleSelectPair = async (presence: PresenceWithProfile) => {
+    try {
+      await handlePair(presence.user_id);
+      const name = presence.profile?.nickname || presence.profile?.username || '?';
+      toast.success(`จับคู่กับ "${name}" สำเร็จ`);
+    } catch {
+      toast.error('จับคู่ไม่สำเร็จ');
+    }
   };
 
-  const handleCancelPair = () => {
-    setMyPairUserId(null);
+  const handleCancelPairLocal = async () => {
+    await handleCancelPair();
     toast.info('ยกเลิกการจับคู่แล้ว');
   };
 
   // ── Admin: move other users / toggle OP / pair others ──────────────────────
   const isAdm = profile?.system_role === 'super_admin' || profile?.system_role === 'admin' || hasPermission('move_player');
   const canPairOthers = hasPermission('admin_pair_others');
-
-  // Admin pair others state
-  const [adminPairTarget, setAdminPairTarget] = useState<string | null>(null);
-  const [adminPairPartnerPickerOpen, setAdminPairPartnerPickerOpen] = useState(false);
 
   const handleMoveUser = useCallback(async (targetUserId: string, channelId: string) => {
     try {
@@ -554,15 +547,18 @@ export default function QueuePage() {
   }, [fetchAll]);
 
   const handleAdminPair = useCallback(async (targetUserId: string, partnerUserId: string) => {
-    // Admin pairs two users — sets the target's pair to partner
-    // This is done client-side; the pair state is already client-side
-    setAdminPairTarget(null);
-    const partner = presenceList.find(p => p.user_id === partnerUserId);
-    const target = presenceList.find(p => p.user_id === targetUserId);
-    if (partner && target) {
-      toast.success(`จับคู่ ${target.profile?.nickname || target.profile?.username} กับ ${partner.profile?.nickname || partner.profile?.username} สำเร็จ`);
+    try {
+      await handlePair(partnerUserId);
+      setAdminPairTarget(null);
+      const partner = presenceList.find(p => p.user_id === partnerUserId);
+      const target = presenceList.find(p => p.user_id === targetUserId);
+      if (partner && target) {
+        toast.success(`จับคู่ ${target.profile?.nickname || target.profile?.username} กับ ${partner.profile?.nickname || partner.profile?.username} สำเร็จ`);
+      }
+    } catch {
+      toast.error('จับคู่ไม่สำเร็จ');
     }
-  }, [presenceList]);
+  }, [handlePair, presenceList]);
 
   if (loading) {
     return (
@@ -611,7 +607,7 @@ export default function QueuePage() {
               <span className="text-xs text-muted-foreground">({partnerPresence.channel.display_name})</span>
             )}
           </div>
-          <button onClick={handleCancelPair} className="text-xs text-destructive hover:underline shrink-0">
+          <button onClick={handleCancelPairLocal} className="text-xs text-destructive hover:underline shrink-0">
             ยกเลิก
           </button>
         </div>
@@ -648,7 +644,7 @@ export default function QueuePage() {
                 toast.success(`ย้ายไป ${channels.find(c => c.id === cid)?.display_name || ''}`);
               }}
               onStartPairing={() => setPairingPickerOpen(true)}
-              onCancelPair={handleCancelPair}
+              onCancelPair={handleCancelPairLocal}
               onMoveUser={handleMoveUser}
               onToggleOPUser={handleToggleOPUser}
               onAdminPair={(targetId) => {

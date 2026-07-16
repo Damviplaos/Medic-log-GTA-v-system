@@ -24,6 +24,22 @@ export async function joinPresence(channelId?: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('ไม่ได้เข้าสู่ระบบ');
 
+  // Check if user already has an active presence — preserve their position
+  const { data: existing } = await supabase
+    .from('user_presence')
+    .select('channel_id, is_op')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (existing) {
+    // User already online — just update heartbeat, don't move them
+    await supabase
+      .from('user_presence')
+      .update({ last_heartbeat: new Date().toISOString() })
+      .eq('user_id', user.id);
+    return existing;
+  }
+
   let targetChannelId = channelId;
   if (!targetChannelId) {
     const { data: readyCh } = await supabase
@@ -34,9 +50,6 @@ export async function joinPresence(channelId?: string) {
     targetChannelId = readyCh?.id;
   }
   if (!targetChannelId) throw new Error('ไม่พบห้องพร้อมทำงาน');
-
-  // Remove old presence
-  await supabase.from('user_presence').delete().eq('user_id', user.id);
 
   // Insert new
   const { data: newPresence, error: insertErr } = await supabase
@@ -399,7 +412,7 @@ export async function setOPStatusForUser(targetUserId: string, isOp: boolean) {
     // Edge function not deployed — fall back to direct DB
   }
 
-  // Fallback: direct update
+  // Fallback: direct update — move to OP or ready room
   const { error: closeErr } = await supabase
     .from('time_logs')
     .update({ ended_at: new Date().toISOString() })
@@ -407,30 +420,78 @@ export async function setOPStatusForUser(targetUserId: string, isOp: boolean) {
     .is('ended_at', null);
   if (closeErr) console.error('close time log error:', closeErr);
 
+  // Find OP/ready channels
+  const { data: opCh } = await supabase.from('channels').select('id').eq('name', 'op').maybeSingle();
+  const { data: readyCh } = await supabase.from('channels').select('id').eq('name', 'ready').maybeSingle();
+
+  const { data: tp } = await supabase.from('user_presence').select('channel_id').eq('user_id', targetUserId).maybeSingle();
+  let newChannelId = tp?.channel_id;
+  if (isOp && opCh) newChannelId = opCh.id;
+  else if (!isOp && readyCh) newChannelId = readyCh.id;
+
   const { error: opErr } = await supabase
     .from('user_presence')
-    .update({ is_op: isOp })
+    .update({ is_op: isOp, channel_id: newChannelId, joined_channel_at: new Date().toISOString() })
     .eq('user_id', targetUserId);
   if (opErr) throw opErr;
 
-  const { data: tp } = await supabase
-    .from('user_presence')
-    .select('channel_id')
-    .eq('user_id', targetUserId)
-    .maybeSingle();
-  if (tp) {
-    const { data: ch } = await supabase
-      .from('channels')
-      .select('track_time')
-      .eq('id', tp.channel_id)
-      .maybeSingle();
+  if (newChannelId) {
+    const { data: ch } = await supabase.from('channels').select('track_time').eq('id', newChannelId).maybeSingle();
     if (ch?.track_time) {
       await supabase.from('time_logs').insert({
         user_id: targetUserId,
-        channel_id: tp.channel_id,
+        channel_id: newChannelId,
         started_at: new Date().toISOString(),
         is_op_time: isOp,
       });
     }
   }
+}
+
+// =============================================
+// Pairing (DB-backed via RPC)
+// =============================================
+
+export async function pairUsers(partnerUserId: string) {
+  try {
+    const { data, error } = await supabase.functions.invoke('manage-presence', {
+      body: { action: 'pair_users', partner_user_id: partnerUserId },
+      method: 'POST',
+    });
+    if (error) {
+      const msg = await error?.context?.text?.();
+      throw new Error(msg || error.message);
+    }
+    if (data?.error) throw new Error(data.error);
+    return;
+  } catch (_e) {
+    // Edge function not deployed — fall back to direct RPC
+  }
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('ไม่ได้เข้าสู่ระบบ');
+  const { error } = await supabase.rpc('pair_users', { p_user_a: user.id, p_user_b: partnerUserId });
+  if (error) throw error;
+}
+
+export async function cancelPair() {
+  try {
+    const { data, error } = await supabase.functions.invoke('manage-presence', {
+      body: { action: 'cancel_pair' },
+      method: 'POST',
+    });
+    if (error) {
+      const msg = await error?.context?.text?.();
+      throw new Error(msg || error.message);
+    }
+    if (data?.error) throw new Error(data.error);
+    return;
+  } catch (_e) {
+    // Edge function not deployed — fall back to direct RPC
+  }
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  const { error } = await supabase.rpc('cancel_pair', { p_user_id: user.id });
+  if (error) console.error('cancel pair error:', error);
 }

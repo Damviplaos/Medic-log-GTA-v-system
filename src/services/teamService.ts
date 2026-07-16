@@ -51,16 +51,18 @@ export async function createTeam(name: string): Promise<Team> {
       name: name.trim(),
       invite_code: inviteCode,
       owner_id: user.id,
+      team_type: 'medic',
     })
     .select()
     .maybeSingle();
   if (error) throw error;
 
   // Set creator's team_id
-  await supabase
+  const { error: profileErr } = await supabase
     .from('profiles')
     .update({ team_id: data.id })
     .eq('id', user.id);
+  if (profileErr) console.error('Failed to set team_id on profile:', profileErr);
 
   return data as Team;
 }

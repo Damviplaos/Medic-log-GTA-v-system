@@ -222,6 +222,16 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      // Find OP room channel
+      let opQuery = supabaseAdmin.from('channels').select('id').eq('name', 'op');
+      if (callerTeamId) opQuery = opQuery.eq('team_id', callerTeamId);
+      const { data: opChannel } = await opQuery.maybeSingle();
+
+      // Find ready room channel
+      let readyQuery = supabaseAdmin.from('channels').select('id').eq('name', 'ready');
+      if (callerTeamId) readyQuery = readyQuery.eq('team_id', callerTeamId);
+      const { data: readyChannel } = await readyQuery.maybeSingle();
+
       // Close current open time log
       await supabaseAdmin
         .from('time_logs')
@@ -229,23 +239,48 @@ Deno.serve(async (req: Request) => {
         .eq('user_id', user.id)
         .is('ended_at', null);
 
-      // Update presence is_op
+      // Move user to appropriate channel based on OP status
+      let newChannelId = presence.channel_id;
+      if (is_op && opChannel) {
+        // Becoming OP → move to OP room
+        newChannelId = opChannel.id;
+      } else if (!is_op && readyChannel) {
+        // Leaving OP → move back to ready room
+        newChannelId = readyChannel.id;
+      }
+
       await supabaseAdmin
         .from('user_presence')
-        .update({ is_op })
+        .update({
+          is_op,
+          channel_id: newChannelId,
+          joined_channel_at: new Date().toISOString(),
+        })
         .eq('user_id', user.id);
+
+      // Log channel change if moved
+      if (newChannelId !== presence.channel_id) {
+        const logData: Record<string, unknown> = {
+          user_id: user.id,
+          from_channel_id: presence.channel_id,
+          to_channel_id: newChannelId,
+          changed_at: new Date().toISOString(),
+        };
+        if (callerTeamId) logData.team_id = callerTeamId;
+        await supabaseAdmin.from('presence_logs').insert(logData);
+      }
 
       // Start new time log with correct is_op_time flag
       const { data: ch } = await supabaseAdmin
         .from('channels')
         .select('track_time')
-        .eq('id', presence.channel_id)
+        .eq('id', newChannelId)
         .maybeSingle();
 
       if (ch?.track_time) {
         const timeLogData: Record<string, unknown> = {
           user_id: user.id,
-          channel_id: presence.channel_id,
+          channel_id: newChannelId,
           started_at: new Date().toISOString(),
           is_op_time: is_op,
         };
@@ -350,6 +385,22 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      // Get target's current presence
+      const { data: targetPresence } = await supabaseAdmin
+        .from('user_presence')
+        .select('channel_id, is_op')
+        .eq('user_id', target_user_id)
+        .maybeSingle();
+
+      // Find OP room and ready room
+      let opQ = supabaseAdmin.from('channels').select('id').eq('name', 'op');
+      if (callerTeamId) opQ = opQ.eq('team_id', callerTeamId);
+      const { data: opChannel } = await opQ.maybeSingle();
+
+      let readyQ = supabaseAdmin.from('channels').select('id').eq('name', 'ready');
+      if (callerTeamId) readyQ = readyQ.eq('team_id', callerTeamId);
+      const { data: readyChannel } = await readyQ.maybeSingle();
+
       // Close existing time log for target
       await supabaseAdmin
         .from('time_logs')
@@ -357,36 +408,97 @@ Deno.serve(async (req: Request) => {
         .eq('user_id', target_user_id)
         .is('ended_at', null);
 
-      // Update is_op
+      // Determine new channel
+      let newChannelId = targetPresence?.channel_id;
+      if (is_op && opChannel) {
+        newChannelId = opChannel.id;
+      } else if (!is_op && readyChannel) {
+        newChannelId = readyChannel.id;
+      }
+
+      // Update is_op and channel
       await supabaseAdmin
         .from('user_presence')
-        .update({ is_op })
+        .update({
+          is_op,
+          channel_id: newChannelId,
+          joined_channel_at: new Date().toISOString(),
+        })
         .eq('user_id', target_user_id);
 
-      // Restart time log with correct OP flag
-      const { data: tp } = await supabaseAdmin
-        .from('user_presence')
-        .select('channel_id')
-        .eq('user_id', target_user_id)
-        .maybeSingle();
+      // Log channel change if moved
+      if (targetPresence && newChannelId !== targetPresence.channel_id) {
+        const logData: Record<string, unknown> = {
+          user_id: target_user_id,
+          from_channel_id: targetPresence.channel_id,
+          to_channel_id: newChannelId,
+          changed_at: new Date().toISOString(),
+        };
+        if (callerTeamId) logData.team_id = callerTeamId;
+        await supabaseAdmin.from('presence_logs').insert(logData);
+      }
 
-      if (tp) {
+      // Restart time log with correct OP flag
+      if (newChannelId) {
         const { data: ch } = await supabaseAdmin
           .from('channels')
           .select('track_time')
-          .eq('id', tp.channel_id)
+          .eq('id', newChannelId)
           .maybeSingle();
 
         if (ch?.track_time) {
           const timeLogData: Record<string, unknown> = {
             user_id: target_user_id,
-            channel_id: tp.channel_id,
+            channel_id: newChannelId,
             started_at: new Date().toISOString(),
             is_op_time: is_op,
           };
           if (callerTeamId) timeLogData.team_id = callerTeamId;
           await supabaseAdmin.from('time_logs').insert(timeLogData);
         }
+      }
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ── Pairing actions ──────────────────────────────────────────────
+    if (action === 'pair_users') {
+      const { partner_user_id } = body;
+      if (!partner_user_id) {
+        return new Response(JSON.stringify({ error: 'ต้องระบุ partner_user_id' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Set pair on both users via RPC
+      const { error: pairErr } = await supabaseAdmin.rpc('pair_users', {
+        p_user_a: user.id,
+        p_user_b: partner_user_id,
+      });
+      if (pairErr) {
+        return new Response(JSON.stringify({ error: pairErr.message }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (action === 'cancel_pair') {
+      const { error: cancelErr } = await supabaseAdmin.rpc('cancel_pair', {
+        p_user_id: user.id,
+      });
+      if (cancelErr) {
+        return new Response(JSON.stringify({ error: cancelErr.message }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       return new Response(JSON.stringify({ success: true }), {

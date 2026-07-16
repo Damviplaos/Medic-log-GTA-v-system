@@ -45,6 +45,7 @@ export interface UserPresence {
   session_started_at: string;
   last_heartbeat: string;
   team_id: string | null;
+  paired_with_user_id: string | null;
   created_at: string;
   // joined from profiles
   profile?: Profile;

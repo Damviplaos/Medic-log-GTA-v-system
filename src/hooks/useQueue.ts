@@ -13,6 +13,8 @@ import {
   advanceQueuePointer,
   randomSelectOP,
   getLastChannelId,
+  pairUsers,
+  cancelPair,
 } from '@/services/presenceService';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTeam } from '@/contexts/TeamContext';
@@ -173,6 +175,25 @@ export function useQueue() {
     }
   }, []);
 
+  const handlePair = useCallback(async (partnerUserId: string) => {
+    try {
+      await pairUsers(partnerUserId);
+      await fetchAll();
+    } catch (err) {
+      console.error('Pair error:', err);
+      throw err;
+    }
+  }, [fetchAll]);
+
+  const handleCancelPair = useCallback(async () => {
+    try {
+      await cancelPair();
+      await fetchAll();
+    } catch (err) {
+      console.error('Cancel pair error:', err);
+    }
+  }, [fetchAll]);
+
   // Group presenceList by channel
   const presenceByChannel = channels.reduce<Record<string, PresenceWithProfile[]>>((acc, ch) => {
     acc[ch.id] = presenceList
@@ -181,12 +202,23 @@ export function useQueue() {
     return acc;
   }, {});
 
-  // OP list — only from ready channel
-  const opList = presenceList.filter(p => p.is_op && p.channel_id === readyChannel?.id);
+  // OP list — users with is_op=true (from OP channel or any channel)
+  const opList = presenceList.filter(p => p.is_op);
+
+  // Filter OP users out of ready channel display (they only show in OP box)
+  const filteredPresenceByChannel = Object.fromEntries(
+    Object.entries(presenceByChannel).map(([chId, presences]) => {
+      const ch = channels.find(c => c.id === chId);
+      if (ch?.name === 'ready') {
+        return [chId, presences.filter(p => !p.is_op)];
+      }
+      return [chId, presences];
+    })
+  );
 
   return {
     presenceList,
-    presenceByChannel,
+    presenceByChannel: filteredPresenceByChannel,
     channels,
     pointer,
     myPresence,
@@ -199,6 +231,8 @@ export function useQueue() {
     handleNextPointer,
     handleRandomOP,
     handleLeave,
+    handlePair,
+    handleCancelPair,
     fetchAll,
   };
 }
